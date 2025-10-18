@@ -14,6 +14,7 @@ To create start postgres:
 
 ## Overview of Database
 
+```
                   +---------+
                   |  Area   |
                   +---------+
@@ -33,7 +34,7 @@ To create start postgres:
                +---------------+           +-----------------+
                |  WellProject  |           | BreakageReport  |
                +---------------+           +-----------------+
-
+```
 
 
 

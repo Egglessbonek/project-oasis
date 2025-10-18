@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Droplets, AlertCircle, BarChart3, QrCode } from "lucide-react";
+import { Droplets, AlertCircle, BarChart3, QrCode, Map } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Landing = () => {
@@ -25,6 +25,9 @@ const Landing = () => {
             <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
               <Button asChild variant="hero" size="lg">
                 <Link to="/report">Report an Issue</Link>
+              </Button>
+              <Button asChild variant="outline" size="lg">
+                <Link to="/map">View Map</Link>
               </Button>
               <Button asChild variant="outline" size="lg">
                 <Link to="/admin">Admin Dashboard</Link>

@@ -21,6 +21,11 @@ interface Well {
   name: string;
   position: [number, number];
   status: string;
+  serviceArea?: {
+    radius: number; // in meters
+    color: string;
+    opacity: number;
+  };
 }
 
 interface WellMapProps {

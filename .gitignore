@@ -13,3 +13,4 @@ build/
 .specstory/
 .cursorindexingignore
 .vite/
+permissions.sql

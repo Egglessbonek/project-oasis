@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Droplets, AlertCircle, BarChart3, QrCode, Map } from "lucide-react";
+import { Droplets, AlertCircle, BarChart3, QrCode, Map, UserCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Landing = () => {
@@ -24,6 +24,9 @@ const Landing = () => {
             </p>
             <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
               <Button asChild variant="hero" size="lg">
+                <Link to="/attendance">Submit Attendance</Link>
+              </Button>
+              <Button asChild variant="outline" size="lg">
                 <Link to="/report">Report an Issue</Link>
               </Button>
               <Button asChild variant="outline" size="lg">
@@ -45,13 +48,13 @@ const Landing = () => {
         <div className="grid gap-8 md:grid-cols-3">
           <Card className="p-6 transition-all hover:shadow-[var(--shadow-hover)]">
             <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-              <QrCode className="h-6 w-6 text-primary" />
+              <UserCheck className="h-6 w-6 text-primary" />
             </div>
             <h3 className="mb-2 text-xl font-semibold text-foreground">
-              QR Code Access
+              Easy Attendance
             </h3>
             <p className="text-muted-foreground">
-              Each well has a unique QR code for instant access to report issues without any hassle.
+              Submit your attendance quickly and easily. Get instant feedback if a well is nearing capacity.
             </p>
           </Card>
 
@@ -92,6 +95,9 @@ const Landing = () => {
           </p>
           <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
             <Button asChild variant="hero" size="lg">
+              <Link to="/attendance">Submit Attendance</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
               <Link to="/report">Report Issue</Link>
             </Button>
             <Button asChild variant="secondary" size="lg">

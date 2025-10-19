@@ -46,6 +46,7 @@ def get_dashboard_data():
                 w.current_load,
                 w.area_id,
                 w.service_area,
+                w.comments,
                 w.created_at,
                 w.updated_at,
                 COUNT(br.id) as issue_count
@@ -53,7 +54,7 @@ def get_dashboard_data():
             LEFT JOIN breakage_reports br ON w.id = br.well_id AND br.status != 'fixed'
             WHERE w.area_id = %s
             GROUP BY w.id, w.location, w.status, w.capacity, w.current_load, 
-                     w.area_id, w.service_area, w.created_at, w.updated_at
+                     w.area_id, w.service_area, w.comments, w.created_at, w.updated_at
             ORDER BY w.created_at DESC
         """
         
@@ -73,9 +74,10 @@ def get_dashboard_data():
                 'current_load': well[5],
                 'area_id': well[6],
                 'service_area': well[7],
-                'created_at': well[8].isoformat() if well[8] else None,
-                'updated_at': well[9].isoformat() if well[9] else None,
-                'issue_count': well[10]
+                'comments': well[8] if well[8] else [],
+                'created_at': well[9].isoformat() if well[9] else None,
+                'updated_at': well[10].isoformat() if well[10] else None,
+                'issue_count': well[11]
             })
         
         # Get statistics
@@ -190,6 +192,55 @@ def create_well():
         print(f"Create well error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
+@admin_bp.route('/wells/<well_id>/resolve-ticket/<int:ticket_index>', methods=['POST'])
+@jwt_required()
+@require_admin
+def resolve_ticket(well_id, ticket_index):
+    """Resolve a ticket by marking it as resolved"""
+    try:
+        admin = request.current_admin
+        
+        # First get the well and its comments
+        query = """
+            SELECT comments
+            FROM wells
+            WHERE id = %s AND area_id = %s
+        """
+        
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(query, [well_id, admin.area_id])
+        result = cursor.fetchone()
+        
+        if not result:
+            return jsonify({'error': 'Well not found or unauthorized'}), 404
+            
+        comments = result[0] or []
+        
+        if ticket_index >= len(comments):
+            return jsonify({'error': 'Ticket index out of range'}), 400
+            
+        # Mark the ticket as resolved by adding "[RESOLVED]" prefix if not already resolved
+        if not comments[ticket_index].startswith('[RESOLVED]'):
+            comments[ticket_index] = '[RESOLVED] ' + comments[ticket_index]
+            
+            # Update the well with modified comments
+            update_query = """
+                UPDATE wells
+                SET comments = %s::TEXT[]
+                WHERE id = %s AND area_id = %s
+                RETURNING id
+            """
+            
+            cursor.execute(update_query, [comments, well_id, admin.area_id])
+            db.session.commit()
+            
+        cursor.close()
+        return jsonify({'success': True, 'comments': comments})
+        
+    except Exception as e:
+        print(f"Resolve ticket error: {e}")
+        return jsonify({'error': 'Server error'}), 500
+
 @admin_bp.route('/wells/<well_id>', methods=['PUT'])
 @jwt_required()
 @require_admin
@@ -284,6 +335,44 @@ def delete_well(well_id):
         
     except Exception as e:
         print(f"Delete well error: {e}")
+        return jsonify({'error': 'Server error'}), 500
+
+@admin_bp.route('/wells/<well_id>/attendance', methods=['POST'])
+def submit_attendance(well_id):
+    """Submit attendance for a well by incrementing current_load"""
+    try:
+        # Update well's current_load
+        update_query = """
+            UPDATE wells
+            SET current_load = current_load + 1,
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING id, current_load, capacity
+        """
+        
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(update_query, [well_id])
+        result = cursor.fetchone()
+        
+        if not result:
+            return jsonify({'error': 'Well not found'}), 404
+            
+        well_id, current_load, capacity = result
+        db.session.commit()
+        cursor.close()
+        
+        # Return warning if well is getting full
+        response = {
+            'success': True,
+            'current_load': current_load,
+            'capacity': capacity,
+            'is_near_capacity': current_load >= capacity * 0.8 if capacity else False
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"Submit attendance error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
 @admin_bp.route('/wells/available', methods=['GET'])

@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from datetime import timedelta
 from flask_jwt_extended import JWTManager
 from flask_session import Session
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ load_dotenv()
 from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.reports import reports_bp
+from routes.wells import wells_bp
 from models import db
 
 def create_app():
@@ -61,6 +63,7 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
     app.register_blueprint(reports_bp, url_prefix='/api/reports')
+    app.register_blueprint(wells_bp, url_prefix='/api/wells')
     
     # Health check endpoint
     @app.route('/api/health')

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Search, CheckCircle, AlertTriangle, Clock, LogOut, User } from "lucide-react";
+import { ArrowLeft, Search, CheckCircle, AlertTriangle, Clock, LogOut, User, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
@@ -60,6 +61,7 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingWell, setEditingWell] = useState<Well | null>(null);
+  const [expandedWellId, setExpandedWellId] = useState<string | null>(null);
   const { user, token, logout } = useAuth();
   const { toast } = useToast();
 
@@ -295,44 +297,161 @@ const AdminDashboard = () => {
 
         {/* Wells List */}
         <div className="space-y-4">
-          {filteredWells.map((well) => (
-            <Card key={well.id} className="p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-xl font-semibold text-foreground">{well.id}</h3>
-                      {getStatusBadge(well.status)}
-                    </div>
-                    <p className="text-muted-foreground">
-                      Location: {`${well.latitude.toFixed(6)}, ${well.longitude.toFixed(6)}`}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Capacity: {well.capacity} | Load: {well.current_load}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Updated: {new Date(well.updated_at).toLocaleDateString()}
-                    </p>
-                  </div>
+          {filteredWells.map((well) => {
+            const hasComments = well.comments && well.comments.length > 0;
+            const isExpanded = expandedWellId === well.id;
 
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <div className="text-sm text-muted-foreground">Active Issues</div>
-                    <div className="text-2xl font-bold text-foreground">{well.issue_count}</div>
+            return (
+              <div key={well.id} className="relative">
+                <Card 
+                  className={cn(
+                    "p-6 transition-colors duration-200",
+                    hasComments && "cursor-pointer hover:bg-muted/50",
+                    isExpanded && "bg-muted/50"
+                  )}
+                  onClick={() => hasComments && setExpandedWellId(isExpanded ? null : well.id)}
+                >
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-xl font-semibold text-foreground">{well.id}</h3>
+                        {getStatusBadge(well.status)}
+                        {hasComments && (
+                          <ChevronDown className={cn(
+                            "h-5 w-5 transition-transform duration-200",
+                            isExpanded && "transform rotate-180"
+                          )} />
+                        )}
+                      </div>
+                      <p className="text-muted-foreground">
+                        Location: {`${well.latitude.toFixed(6)}, ${well.longitude.toFixed(6)}`}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Capacity: {well.capacity} | Load: {well.current_load}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Updated: {new Date(well.updated_at).toLocaleDateString()}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <div className="text-sm text-muted-foreground">Unresolved Issues</div>
+                        <div className="text-2xl font-bold text-foreground">
+                          {well.comments ? well.comments.filter(comment => !comment.startsWith('[RESOLVED]')).length : 0}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="destructive" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteWell(well.id);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                        <Button 
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingWell(well);
+                          }}
+                        >
+                          Edit Status
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="destructive" onClick={() => handleDeleteWell(well.id)}>Delete</Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => setEditingWell(well)}
-                    >
-                      Edit Status
-                    </Button>
-                    <WellComments comments={well.comments || []} />
-                  </div>
+                </Card>
+
+                <div
+                  className={cn(
+                    "overflow-hidden transition-all duration-300 ease-in-out",
+                    isExpanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+                  )}
+                >
+                  <Card className="mt-1 p-4 border-t-2 border-primary">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium">Reports History</h4>
+                      <div className="text-sm text-muted-foreground">
+                        {well.comments.filter(comment => comment.startsWith('[RESOLVED]')).length} resolved · {well.comments.filter(comment => !comment.startsWith('[RESOLVED]')).length} unresolved
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {well.comments.map((comment, index) => {
+                        const isResolved = comment.startsWith('[RESOLVED]');
+                        
+                        const handleResolve = async () => {
+                          try {
+                            const response = await fetch(`${API_BASE_URL}/admin/wells/${well.id}/resolve-ticket/${index}`, {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json',
+                              },
+                            });
+
+                            if (response.ok) {
+                              toast({
+                                title: "Success",
+                                description: "Ticket marked as resolved",
+                              });
+                              fetchDashboardData();
+                            } else {
+                              throw new Error('Failed to resolve ticket');
+                            }
+                          } catch (error) {
+                            toast({
+                              variant: "destructive",
+                              title: "Error",
+                              description: error instanceof Error ? error.message : 'Failed to resolve ticket',
+                            });
+                          }
+                        };
+
+                        return (
+                          <div
+                            key={index}
+                            className={cn(
+                              "rounded-md border p-3 text-sm",
+                              isResolved ? "bg-accent/20" : "bg-muted/30"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className={cn(
+                                "flex-1",
+                                isResolved && "text-muted-foreground"
+                              )}>
+                                {isResolved ? comment.replace('[RESOLVED] ', '') : comment}
+                              </div>
+                              {!isResolved && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="shrink-0"
+                                  onClick={handleResolve}
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                  <span className="ml-2">Resolve</span>
+                                </Button>
+                              )}
+                              {isResolved && (
+                                <div className="flex items-center text-accent-foreground">
+                                  <CheckCircle className="h-4 w-4" />
+                                  <span className="ml-2 text-xs">Resolved</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
                 </div>
               </div>
-            </Card>
-          ))}
+            );
+          })}
         </div>
 
         {filteredWells.length === 0 && (

@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import ReportIssue from "./pages/ReportIssue";
+import SubmitAttendance from "./pages/SubmitAttendance";
 import Login from "./pages/Login";
 import OAuthCallback from "./pages/OAuthCallback";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -25,6 +26,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/report" element={<ReportIssue />} />
+          <Route path="/attendance" element={<SubmitAttendance />} />
             <Route path="/login" element={<Login />} />
             <Route path="/oauth/callback" element={<OAuthCallback />} />
             <Route path="/admin" element={

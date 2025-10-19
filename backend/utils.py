@@ -25,22 +25,71 @@ from models import Area, Well, db
 
 def _geometry_to_lonlat(geom):
     """Converts a GeoAlchemy Geometry object (Point) to a (lon, lat) tuple."""
-    shapely_geom = to_shape(geom)
-    mapping = shapely_geom.__geo_interface__
-    coords = mapping['coordinates']
-    return (coords[0], coords[1]) # (lon, lat)
+    # Use raw SQL to extract coordinates from PostGIS binary data
+    from sqlalchemy import text
+    from models import db
+    
+    # Get the well ID from the geom object (assuming it's a Well instance)
+    if hasattr(geom, 'id'):
+        well_id = geom.id
+        query = text("SELECT ST_X(location) as lng, ST_Y(location) as lat FROM wells WHERE id = :well_id")
+        result = db.session.execute(query, {"well_id": well_id}).fetchone()
+        if result:
+            return (float(result.lng), float(result.lat))
+    
+    # Fallback: try to use to_shape if it's a proper geometry object
+    try:
+        shapely_geom = to_shape(geom)
+        mapping = shapely_geom.__geo_interface__
+        coords = mapping['coordinates']
+        return (coords[0], coords[1]) # (lon, lat)
+    except:
+        raise ValueError("Could not extract coordinates from geometry")
 
 def _geometry_to_lonlat_list(geom):
     """Converts a GeoAlchemy Geometry object (Polygon) to a list of (lon, lat) tuples."""
-    shapely_geom = to_shape(geom)
-    mapping = shapely_geom.__geo_interface__
-    coords = mapping['coordinates'][0] 
-    return [(lon, lat) for lon, lat in coords]
+    # Use raw SQL to extract coordinates from PostGIS binary data
+    from sqlalchemy import text
+    from models import db
+    
+    # Get the area ID from the geom object (assuming it's an Area instance)
+    if hasattr(geom, 'id'):
+        area_id = geom.id
+        query = text("SELECT ST_AsText(boundary) as boundary_text FROM areas WHERE id = :area_id")
+        result = db.session.execute(query, {"area_id": area_id}).fetchone()
+        if result and result.boundary_text:
+            # Parse the WKT POLYGON string
+            import re
+            polygon_match = re.search(r'POLYGON\(\(([^)]+)\)\)', result.boundary_text)
+            if polygon_match:
+                coords_str = polygon_match.group(1)
+                coord_pairs = coords_str.split(',')
+                coords = []
+                for pair in coord_pairs:
+                    parts = pair.strip().split()
+                    if len(parts) >= 2:
+                        lng = float(parts[0])
+                        lat = float(parts[1])
+                        coords.append((lng, lat))
+                return coords
+    
+    # Fallback: try to use to_shape if it's a proper geometry object
+    try:
+        shapely_geom = to_shape(geom)
+        mapping = shapely_geom.__geo_interface__
+        coords = mapping['coordinates'][0] 
+        return [(lon, lat) for lon, lat in coords]
+    except:
+        raise ValueError("Could not extract coordinates from geometry")
 
 def _lonlat_list_to_geometry(lonlat_list):
     """Converts a list of (lon, lat) tuples back to a DB-saveable WKT string."""
+    # Convert numpy arrays to lists if needed
+    if hasattr(lonlat_list[0], 'tolist'):
+        lonlat_list = [point.tolist() if hasattr(point, 'tolist') else point for point in lonlat_list]
+    
     # Ensure the polygon is closed (first and last points are the same)
-    if lonlat_list[0] != lonlat_list[-1]:
+    if len(lonlat_list) > 0 and lonlat_list[0] != lonlat_list[-1]:
         lonlat_list.append(lonlat_list[0])
     
     wkt_coords = ", ".join(f"{lon} {lat}" for lon, lat in lonlat_list)
@@ -227,10 +276,10 @@ def recalculate_service_areas(area_id):
 
         # --- Format data for the black box ---
         point_ids = [str(well.id) for well in all_wells_to_calculate]
-        points_lon_lat = [_geometry_to_lonlat(well.location) for well in all_wells_to_calculate]
+        points_lon_lat = [_geometry_to_lonlat(well) for well in all_wells_to_calculate]
         # Use capacity as weight. Broken wells have 0 capacity.
         point_weights = [well.capacity if well.status != 'broken' else 0 for well in all_wells_to_calculate]
-        boundary_lon_lat = _geometry_to_lonlat_list(area.boundary)
+        boundary_lon_lat = _geometry_to_lonlat_list(area)
         
         current_app.logger.info(f"Recalculating for {len(point_ids)} wells in area {area.name}...")
 

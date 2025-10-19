@@ -21,13 +21,14 @@ interface WellData {
     color: string;
     opacity: number;
   } | string;
-  circular_service_area?: [number, number][];
+  service_area_coords?: [number, number][];
   polygon?: [number, number][];
 }
 
 const MapPage = () => {
   const [showServiceAreas, setShowServiceAreas] = useState(true);
   const [wells, setWells] = useState<WellData[]>([]);
+  const [areaBoundaries, setAreaBoundaries] = useState<any[]>([]);
   const [jsonData, setJsonData] = useState<string>("");
   
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -43,8 +44,12 @@ const MapPage = () => {
         }
         const data = await response.json();
         
-        // Transform data for map display
-        const transformedWells = data.map((well: any) => ({
+        // Handle new response structure with wells and area_boundaries
+        const wellsData = data.wells || data; // Support both old and new format
+        const areaBoundaries = data.area_boundaries || [];
+        
+        // Transform wells data for map display
+        const transformedWells = wellsData.map((well: any) => ({
           id: well.id,
           name: `Well ${well.id}`,
           position: [well.latitude, well.longitude] as [number, number],
@@ -54,10 +59,11 @@ const MapPage = () => {
           current_load: well.current_load || 0,
           usage_percentage: well.usage_percentage || 0,
           serviceArea: well.service_area ? well.service_area : createServiceArea(300, well.status === 'completed' ? 'operational' : 'needs-repair'),
-          circular_service_area: well.circular_service_area || []
+          service_area_coords: well.service_area_coords || []
         }));
 
         setWells(transformedWells);
+        setAreaBoundaries(areaBoundaries);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load wells');
       } finally {
@@ -154,7 +160,7 @@ const MapPage = () => {
               </Button>
             </div>
           ) : (
-            <LeafletBasicMap wells={wellsToDisplay} />
+            <LeafletBasicMap wells={wellsToDisplay} areaBoundaries={areaBoundaries} />
           )}
         </div>
       </div>

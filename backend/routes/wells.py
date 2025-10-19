@@ -115,22 +115,24 @@ def get_wells_for_map():
     Get wells data formatted for map display.
     """
     try:
-        # Use raw SQL to extract coordinates from PostGIS binary format
+        # Use raw SQL to extract coordinates and create service areas within area boundaries
         from sqlalchemy import text
         
-        # Query wells with coordinates and circular service areas
+        # Query wells with coordinates, service areas, and area boundaries
         query = text("""
             SELECT 
-                id,
-                ST_Y(location) as latitude,
-                ST_X(location) as longitude,
-                status,
-                capacity,
-                current_load,
-                service_area,
-                -- Create circular service area around each well
-                ST_AsText(ST_Buffer(location::geography, 1000)::geometry) as circular_service_area
-            FROM wells
+                w.id,
+                ST_Y(w.location) as latitude,
+                ST_X(w.location) as longitude,
+                w.status,
+                w.capacity,
+                w.current_load,
+                ST_AsText(w.service_area) as service_area_text,
+                ST_AsText(a.boundary) as area_boundary_text,
+                a.id as area_id,
+                a.name as area_name
+            FROM wells w
+            JOIN areas a ON w.area_id = a.id
         """)
         
         result = db.session.execute(query)
@@ -138,15 +140,17 @@ def get_wells_for_map():
         
         # Format wells data for map display
         map_wells = []
+        area_boundaries = {}  # Store unique area boundaries
+        
         for well in wells_data:
-            # Parse circular service area coordinates
-            circular_coords = []
-            if well.circular_service_area:
+            # Parse area boundary coordinates
+            area_coords = []
+            if well.area_boundary_text:
                 import re
-                # Parse POLYGON((lng1 lat1, lng2 lat2, ...)) format
-                polygon_match = re.search(r'POLYGON\(\(([^)]+)\)\)', well.circular_service_area)
-                if polygon_match:
-                    coords_str = polygon_match.group(1)
+                # Handle different geometry types (POLYGON, MULTIPOLYGON, etc.)
+                geometry_match = re.search(r'(POLYGON|MULTIPOLYGON)\(\(([^)]+)\)\)', well.area_boundary_text)
+                if geometry_match:
+                    coords_str = geometry_match.group(2)
                     # Split by comma and parse each coordinate pair
                     coord_pairs = coords_str.split(',')
                     for pair in coord_pairs:
@@ -154,7 +158,48 @@ def get_wells_for_map():
                         if len(parts) >= 2:
                             lng = float(parts[0])
                             lat = float(parts[1])
-                            circular_coords.append([lat, lng])  # Leaflet expects [lat, lng]
+                            area_coords.append([lat, lng])  # Leaflet expects [lat, lng]
+                else:
+                    # Fallback: try to extract any coordinates from the geometry
+                    numbers = re.findall(r'-?\d+\.?\d*', well.area_boundary_text)
+                    if len(numbers) >= 4:  # At least 2 coordinate pairs
+                        for i in range(0, len(numbers) - 1, 2):
+                            lng = float(numbers[i])
+                            lat = float(numbers[i + 1])
+                            area_coords.append([lat, lng])
+            
+            # Parse service area coordinates
+            service_area_coords = []
+            if well.service_area_text:
+                import re
+                # Handle different geometry types (POLYGON, MULTIPOLYGON, etc.)
+                geometry_match = re.search(r'(POLYGON|MULTIPOLYGON)\(\(([^)]+)\)\)', well.service_area_text)
+                if geometry_match:
+                    coords_str = geometry_match.group(2)
+                    # Split by comma and parse each coordinate pair
+                    coord_pairs = coords_str.split(',')
+                    for pair in coord_pairs:
+                        parts = pair.strip().split()
+                        if len(parts) >= 2:
+                            lng = float(parts[0])
+                            lat = float(parts[1])
+                            service_area_coords.append([lat, lng])  # Leaflet expects [lat, lng]
+                else:
+                    # Fallback: try to extract any coordinates from the geometry
+                    numbers = re.findall(r'-?\d+\.?\d*', well.service_area_text)
+                    if len(numbers) >= 4:  # At least 2 coordinate pairs
+                        for i in range(0, len(numbers) - 1, 2):
+                            lng = float(numbers[i])
+                            lat = float(numbers[i + 1])
+                            service_area_coords.append([lat, lng])
+            
+            # Store area boundary if not already stored
+            if well.area_id not in area_boundaries and area_coords:
+                area_boundaries[well.area_id] = {
+                    'id': str(well.area_id),
+                    'name': well.area_name,
+                    'boundary_coords': area_coords
+                }
             
             map_well = {
                 'id': str(well.id),
@@ -165,16 +210,101 @@ def get_wells_for_map():
                 'current_load': well.current_load,
                 'usage_percentage': well.current_load / well.capacity * 100 if well.capacity > 0 else 0,
                 'status_color': '#10B981' if well.status == 'completed' else '#EF4444',
-                'service_area': well.service_area,
-                'circular_service_area': circular_coords
+                'area_id': str(well.area_id),
+                'area_name': well.area_name,
+                'service_area_coords': service_area_coords
             }
             map_wells.append(map_well)
         
-        current_app.logger.info(f"Retrieved {len(map_wells)} wells for map display")
-        return jsonify(map_wells)
+        # Add area boundaries to response
+        response_data = {
+            'wells': map_wells,
+            'area_boundaries': list(area_boundaries.values())
+        }
+        
+        current_app.logger.info(f"Retrieved {len(map_wells)} wells and {len(area_boundaries)} area boundaries for map display")
+        return jsonify(response_data)
     except Exception as e:
         current_app.logger.error(f"Error getting wells for map: {e}", exc_info=True)
         return jsonify({"error": "Failed to get wells for map"}), 500
+
+
+@wells_bp.route('/map/<uuid:area_id>', methods=['GET'])
+def get_wells_for_map_by_area(area_id):
+    """
+    Get wells data formatted for map display for a specific area.
+    Uses the area's boundary to create proper service areas.
+    """
+    try:
+        # Use raw SQL to extract coordinates and create service areas within specific area boundary
+        from sqlalchemy import text
+        
+        # Query wells for specific area with existing service areas
+        query = text("""
+            SELECT 
+                w.id,
+                ST_Y(w.location) as latitude,
+                ST_X(w.location) as longitude,
+                w.status,
+                w.capacity,
+                w.current_load,
+                ST_AsText(w.service_area) as service_area_text,
+                a.boundary as area_boundary
+            FROM wells w
+            JOIN areas a ON w.area_id = a.id
+            WHERE a.id = :area_id
+        """)
+        
+        result = db.session.execute(query, {"area_id": str(area_id)})
+        wells_data = result.fetchall()
+        
+        # Format wells data for map display
+        map_wells = []
+        for well in wells_data:
+            # Parse existing service area coordinates
+            service_area_coords = []
+            if well.service_area_text:
+                import re
+                # Handle different geometry types (POLYGON, MULTIPOLYGON, etc.)
+                geometry_match = re.search(r'(POLYGON|MULTIPOLYGON)\(\(([^)]+)\)\)', well.service_area_text)
+                if geometry_match:
+                    coords_str = geometry_match.group(2)
+                    # Split by comma and parse each coordinate pair
+                    coord_pairs = coords_str.split(',')
+                    for pair in coord_pairs:
+                        parts = pair.strip().split()
+                        if len(parts) >= 2:
+                            lng = float(parts[0])
+                            lat = float(parts[1])
+                            service_area_coords.append([lat, lng])  # Leaflet expects [lat, lng]
+                else:
+                    # Fallback: try to extract any coordinates from the geometry
+                    numbers = re.findall(r'-?\d+\.?\d*', well.service_area_text)
+                    if len(numbers) >= 4:  # At least 2 coordinate pairs
+                        for i in range(0, len(numbers) - 1, 2):
+                            lng = float(numbers[i])
+                            lat = float(numbers[i + 1])
+                            service_area_coords.append([lat, lng])
+            
+            map_well = {
+                'id': str(well.id),
+                'latitude': float(well.latitude),
+                'longitude': float(well.longitude),
+                'status': well.status,
+                'capacity': well.capacity,
+                'current_load': well.current_load,
+                'usage_percentage': well.current_load / well.capacity * 100 if well.capacity > 0 else 0,
+                'status_color': '#10B981' if well.status == 'completed' else '#EF4444',
+                'service_area': well.service_area_text,
+                'service_area_coords': service_area_coords
+            }
+            map_wells.append(map_well)
+        
+        current_app.logger.info(f"Retrieved {len(map_wells)} wells for area {area_id}")
+        return jsonify(map_wells)
+    except Exception as e:
+        current_app.logger.error(f"Error getting wells for map by area: {e}", exc_info=True)
+        return jsonify({"error": "Failed to get wells for map by area"}), 500
 
 
 @wells_bp.route('/<uuid:well_id>/update-weight', methods=['POST'])

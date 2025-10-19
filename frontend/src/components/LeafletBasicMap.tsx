@@ -18,16 +18,23 @@ interface Well {
     color: string;
     opacity: number;
   } | string; // Can be PostGIS POLYGON string
-  circular_service_area?: [number, number][];
+  service_area_coords?: [number, number][];
+}
+
+interface AreaBoundary {
+  id: string;
+  name: string;
+  boundary_coords: [number, number][];
 }
 
 interface LeafletBasicMapProps {
   wells: Well[];
+  areaBoundaries?: AreaBoundary[];
   center?: [number, number];
   zoom?: number;
 }
 
-const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: LeafletBasicMapProps) => {
+const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.7431], zoom = 13 }: LeafletBasicMapProps) => {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<LeafletMap | null>(null);
   const navigate = useNavigate();
@@ -125,17 +132,21 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
       });
 
       // Add service area if defined
-      if (well.serviceArea || well.circular_service_area) {
+      if (well.serviceArea || well.service_area_coords) {
         let serviceAreaLayer;
         
-        // Use circular service area if available (from PostGIS ST_Buffer)
-        if (well.circular_service_area && well.circular_service_area.length > 0) {
-          serviceAreaLayer = L.polygon(well.circular_service_area, {
-            color: well.status_color || '#10B981',
-            fillColor: well.status_color || '#10B981',
-            fillOpacity: 0.2,
-            weight: 2,
-          }).addTo(map);
+        // Use service area coordinates if available
+        if (well.service_area_coords && well.service_area_coords.length > 0) {
+          try {
+            serviceAreaLayer = L.polygon(well.service_area_coords, {
+              color: well.status_color || '#10B981',
+              fillColor: well.status_color || '#10B981',
+              fillOpacity: 0.2,
+              weight: 2,
+            }).addTo(map);
+          } catch (error) {
+            console.error(`Error rendering service area for well ${well.id}:`, error);
+          }
         } else if (typeof well.serviceArea === 'string') {
           // Parse PostGIS POLYGON string
           const coordsMatch = well.serviceArea.match(/\(\((.*?)\)\)/);
@@ -178,10 +189,62 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
       }
     });
 
-    // Fit map bounds to show all wells
-    if (markers.length > 0) {
-      const group = L.featureGroup(markers);
+    // Add area boundaries with shading
+    areaBoundaries.forEach((area) => {
+      if (area.boundary_coords && area.boundary_coords.length > 0) {
+        const areaPolygon = L.polygon(area.boundary_coords, {
+          color: '#1E40AF',
+          weight: 3,
+          opacity: 0.9,
+          fillColor: '#3B82F6',
+          fillOpacity: 0.3,  // Increased opacity for better shading
+          fillRule: 'evenodd'
+        }).addTo(map);
+        
+        // Add popup for area boundary
+        areaPolygon.bindPopup(`
+          <div class="text-center p-2">
+            <h4 class="font-semibold text-sm mb-1">Administrative Area</h4>
+            <p class="text-xs text-gray-600">${area.name}</p>
+            <p class="text-xs text-gray-500">Area ID: ${area.id}</p>
+          </div>
+        `);
+      }
+    });
+
+    // Fit map bounds to show all wells and service areas
+    const allLayers: any[] = [...markers];
+    
+    // Add service area layers to bounds calculation
+    wells.forEach((well) => {
+      if (well.service_area_coords && well.service_area_coords.length > 0) {
+        try {
+          const serviceAreaLayer = L.polygon(well.service_area_coords);
+          allLayers.push(serviceAreaLayer);
+        } catch (error) {
+          console.error(`Error creating service area layer for bounds:`, error);
+        }
+      }
+    });
+    
+    // Add area boundary layers to bounds calculation
+    areaBoundaries.forEach((area) => {
+      if (area.boundary_coords && area.boundary_coords.length > 0) {
+        try {
+          const areaLayer = L.polygon(area.boundary_coords);
+          allLayers.push(areaLayer);
+        } catch (error) {
+          console.error(`Error creating area boundary layer for bounds:`, error);
+        }
+      }
+    });
+    
+    if (allLayers.length > 0) {
+      const group = L.featureGroup(allLayers);
       map.fitBounds(group.getBounds().pad(0.1));
+    } else {
+      // If no layers, ensure we're showing the default center (Austin)
+      map.setView(center, zoom);
     }
 
     // Cleanup

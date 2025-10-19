@@ -39,6 +39,8 @@ def _geometry_to_lonlat_list(geom):
 
 def _lonlat_list_to_geometry(lonlat_list):
     """Converts a list of (lon, lat) tuples back to a DB-saveable WKT string."""
+    lonlat_list = list(map(tuple, lonlat_list))  # ensure it's a list of tuples
+
     # Ensure the polygon is closed (first and last points are the same)
     if not lonlat_list or lonlat_list[0] != lonlat_list[-1]:
         lonlat_list.append(lonlat_list[0])

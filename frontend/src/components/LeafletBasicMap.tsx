@@ -83,14 +83,24 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
           <p class="text-sm text-muted-foreground mb-2">
             Usage: ${well.current_load}/${well.capacity} (${well.usage_percentage}%)
           </p>
-          <button id="report-${well.id}" class="px-3 py-1 border rounded text-sm">Report Issue</button>
+          <div class="flex flex-col gap-2">
+            <button id="attendance-${well.id}" class="px-3 py-1 border rounded text-sm bg-primary text-primary-foreground">Submit Attendance</button>
+            <button id="report-${well.id}" class="px-3 py-1 border rounded text-sm">Report Issue</button>
+          </div>
         </div>
       `;
       marker.bindPopup(popupHtml);
       marker.on('popupopen', () => {
-        const btn = document.getElementById(`report-${well.id}`);
-        if (btn) {
-          btn.addEventListener('click', () => navigate('/report'), { once: true });
+        // Report button
+        const reportBtn = document.getElementById(`report-${well.id}`);
+        if (reportBtn) {
+          reportBtn.addEventListener('click', () => navigate(`/report?wellId=${well.id}`), { once: true });
+        }
+        
+        // Attendance button
+        const attendanceBtn = document.getElementById(`attendance-${well.id}`);
+        if (attendanceBtn) {
+          attendanceBtn.addEventListener('click', () => navigate(`/attendance?wellId=${well.id}`), { once: true });
         }
       });
 

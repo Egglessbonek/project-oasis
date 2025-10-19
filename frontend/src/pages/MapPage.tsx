@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import LeafletBasicMap from "@/components/LeafletBasicMap";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import { createServiceArea } from "@/lib/utils";
 import 'leaflet/dist/leaflet.css';
 
@@ -76,15 +77,7 @@ const MapPage = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button asChild variant="outline" size="icon">
-              <Link to="/">
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-            <h1 className="text-3xl font-bold text-foreground">Water Wells Map</h1>
-          </div>
+        <div className="mb-6 flex items-center justify-end">
           <Button
             variant="outline"
             onClick={() => setShowServiceAreas(!showServiceAreas)}
@@ -96,7 +89,18 @@ const MapPage = () => {
         </div>
 
         <div className="rounded-lg overflow-hidden border border-border shadow-lg" style={{ height: '600px' }}>
-          <LeafletBasicMap wells={wellsToDisplay} />
+          {loading ? (
+            <LoadingSpinner />
+          ) : error ? (
+            <div className="flex min-h-[200px] flex-col items-center justify-center gap-4 p-4 text-center">
+              <p className="text-destructive">{error}</p>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Try Again
+              </Button>
+            </div>
+          ) : (
+            <LeafletBasicMap wells={wellsToDisplay} />
+          )}
         </div>
       </div>
     </div>

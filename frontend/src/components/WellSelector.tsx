@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
@@ -15,13 +16,16 @@ interface Well {
 
 interface WellSelectorProps {
   onWellSelect: (wellId: string) => void;
+  initialWellId?: string;
 }
 
-const WellSelector = ({ onWellSelect }: WellSelectorProps) => {
+const WellSelector = ({ onWellSelect, initialWellId }: WellSelectorProps) => {
   const [wells, setWells] = useState<Well[]>([]);
-  const [selectedWell, setSelectedWell] = useState<string>('');
+  const [selectedWell, setSelectedWell] = useState<string>(initialWellId || '');
   const [error, setError] = useState<string>('');
+  const [loading, setLoading] = useState(true);
 
+  // Fetch wells only once when component mounts
   useEffect(() => {
     const fetchWells = async () => {
       try {
@@ -34,28 +38,44 @@ const WellSelector = ({ onWellSelect }: WellSelectorProps) => {
         }
       } catch (error) {
         setError('Failed to load available wells');
+      } finally {
+        setLoading(false);
       }
     };
 
     fetchWells();
-  }, []);
+  }, []); // Empty dependency array - only run once
+
+  // Handle initialWellId changes separately
+  useEffect(() => {
+    if (initialWellId && wells.some(well => well.id === initialWellId) && selectedWell !== initialWellId) {
+      setSelectedWell(initialWellId);
+    }
+  }, [initialWellId, wells]);
 
   const handleWellSelect = (wellId: string) => {
     setSelectedWell(wellId);
     onWellSelect(wellId);
   };
 
-  if (error) {
-    return (
-      <Card className="p-4 text-center text-destructive">
-        {error}
-      </Card>
-    );
-  }
+  const content = () => {
+    if (error) {
+      return (
+        <div className="text-center text-destructive">
+          {error}
+        </div>
+      );
+    }
 
-  return (
-    <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">Select a Well</h3>
+    if (wells.length === 0 && !error) {
+      return (
+        <p className="text-center text-muted-foreground">
+          No wells available for reporting
+        </p>
+      );
+    }
+
+    return (
       <RadioGroup value={selectedWell} onValueChange={handleWellSelect}>
         <div className="space-y-4">
           {wells.map((well) => (
@@ -76,10 +96,16 @@ const WellSelector = ({ onWellSelect }: WellSelectorProps) => {
           ))}
         </div>
       </RadioGroup>
-      {wells.length === 0 && !error && (
-        <p className="text-center text-muted-foreground mt-4">
-          No wells available for reporting
-        </p>
+    );
+  };
+
+  return (
+    <Card className="p-6">
+      <h3 className="text-lg font-semibold mb-4">Select a Well</h3>
+      {loading ? (
+        <LoadingSpinner size="sm" />
+      ) : (
+        content()
       )}
     </Card>
   );

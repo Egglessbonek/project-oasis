@@ -47,9 +47,9 @@ const Login = () => {
             <ArrowLeft className="h-4 w-4" />
             Back to Home
           </Link>
-          <h1 className="text-2xl font-bold text-foreground">Admin Login</h1>
+          <h1 className="text-2xl font-bold text-foreground">Administrator Login</h1>
           <p className="text-muted-foreground">
-            Sign in to access the admin dashboard
+            Sign in to access the administrator dashboard
           </p>
         </div>
 
@@ -63,9 +63,9 @@ const Login = () => {
         {/* Login Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Admin Sign In</CardTitle>
+            <CardTitle>Administrator Sign In</CardTitle>
             <CardDescription>
-              Sign in with your Google account to access the admin panel
+              Sign in with your Google account to access the administrator panel
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

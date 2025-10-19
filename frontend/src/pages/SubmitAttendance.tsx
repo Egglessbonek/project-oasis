@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
 import { ArrowLeft } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import WellSelector from "@/components/WellSelector";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -11,8 +12,17 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
 const SubmitAttendance = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [selectedWellId, setSelectedWellId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Set initial well ID from URL query parameter
+  useEffect(() => {
+    const wellId = searchParams.get('wellId');
+    if (wellId) {
+      setSelectedWellId(wellId);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,17 +75,6 @@ const SubmitAttendance = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <Link to="/" className="flex items-center gap-2 text-foreground transition-colors hover:text-primary">
-            <ArrowLeft className="h-5 w-5" />
-            <span className="font-medium">Back to Home</span>
-          </Link>
-          <h1 className="text-xl font-bold text-foreground">Submit Attendance</h1>
-          <div className="w-24" /> {/* Spacer for alignment */}
-        </div>
-      </header>
 
       {/* Form Section */}
       <section className="container mx-auto px-4 py-12">
@@ -91,7 +90,7 @@ const SubmitAttendance = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <WellSelector onWellSelect={setSelectedWellId} />
+                <WellSelector onWellSelect={setSelectedWellId} initialWellId={selectedWellId} />
               </div>
 
               <div className="flex flex-col gap-4 pt-4">
@@ -99,13 +98,21 @@ const SubmitAttendance = () => {
                   type="submit" 
                   variant="hero" 
                   disabled={submitting}
+                  className="relative"
                 >
-                  {submitting ? "Submitting..." : "Submit Attendance"}
+                  {submitting ? (
+                    <>
+                      <LoadingSpinner size="sm" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+                      <span className="opacity-0">Submit Attendance</span>
+                    </>
+                  ) : (
+                    "Submit Attendance"
+                  )}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => navigate('/report', { state: { wellId: selectedWellId } })}
+                  onClick={() => navigate(`/report?wellId=${selectedWellId}`)}
                 >
                   Need Help? Report an Issue
                 </Button>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,11 +7,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Send } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import WellSelector from "@/components/WellSelector";
 
 const ReportIssue = () => {
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
   const [formData, setFormData] = useState({
     wellId: "",
     issueType: "",
@@ -21,6 +23,14 @@ const ReportIssue = () => {
   });
 
   const [submitting, setSubmitting] = useState(false);
+
+  // Set initial well ID from URL query parameter
+  useEffect(() => {
+    const wellId = searchParams.get('wellId');
+    if (wellId) {
+      setFormData(prev => ({ ...prev, wellId }));
+    }
+  }, [searchParams]);
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,17 +87,6 @@ const ReportIssue = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <Link to="/" className="flex items-center gap-2 text-foreground transition-colors hover:text-primary">
-            <ArrowLeft className="h-5 w-5" />
-            <span className="font-medium">Back to Home</span>
-          </Link>
-          <h1 className="text-xl font-bold text-foreground">Report Well Issue</h1>
-          <div className="w-24" /> {/* Spacer for alignment */}
-        </div>
-      </header>
 
       {/* Form Section */}
       <section className="container mx-auto px-4 py-12">
@@ -104,7 +103,10 @@ const ReportIssue = () => {
               <div>
                 <Label>Select Well *</Label>
                 <div className="mt-2">
-                  <WellSelector onWellSelect={(wellId) => setFormData({ ...formData, wellId })} />
+                  <WellSelector 
+                    onWellSelect={(wellId) => setFormData({ ...formData, wellId })}
+                    initialWellId={formData.wellId}
+                  />
                 </div>
               </div>
 
@@ -170,11 +172,23 @@ const ReportIssue = () => {
                 <Button 
                   type="submit" 
                   variant="hero" 
-                  className="flex-1"
+                  className="flex-1 relative"
                   disabled={submitting}
                 >
-                  <Send className="mr-2 h-4 w-4" />
-                  {submitting ? "Submitting..." : "Submit Report"}
+                  {submitting ? (
+                    <>
+                      <LoadingSpinner size="sm" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+                      <span className="opacity-0">
+                        <Send className="mr-2 h-4 w-4" />
+                        Submit Report
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="mr-2 h-4 w-4" />
+                      Submit Report
+                    </>
+                  )}
                 </Button>
                 <Button
                   type="button"

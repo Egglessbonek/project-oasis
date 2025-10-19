@@ -1,113 +1,229 @@
-from flask import Blueprint, request, jsonify
-from models import db
-from datetime import datetime
-from typing import Dict, Any
+# =============================================================================
+#                         Project Oasis - Well Routes
+#
+# This file contains all API endpoints related to wells.
+# =============================================================================
 
-wells_bp = Blueprint('wells', __name__)
+from flask import Blueprint, jsonify, request, current_app
+from models import Well, db
+from schemas import WellSchema, WellSchema
+# Import the new service function
+from utils import recalculate_service_areas
+
+# Create a Blueprint for the well routes
+wells_bp = Blueprint('wells', __name__, url_prefix='/api/wells')
+
+# Initialize Marshmallow schemas
+well_schema = WellSchema()
+wells_schema = WellSchema(many=True)
+
+
+@wells_bp.route('/', methods=['GET', 'POST'])
+def handle_wells():
+    """
+    Endpoint for retrieving a list of all wells and creating a new well.
+    """
+    if request.method == 'POST':
+        # --- Create a new well ---
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No input data provided"}), 400
+
+        try:
+            new_well = well_schema.load(data)
+            db.session.add(new_well)
+            db.session.commit()
+            return jsonify(well_schema.dump(new_well)), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "Failed to create well", "messages": str(e)}), 400
+
+    else: # request.method == 'GET'
+        # --- Retrieve all wells ---
+        all_wells = Well.query.all()
+        result = wells_schema.dump(all_wells)
+        return jsonify(result)
+
+
+@wells_bp.route('/<uuid:well_id>', methods=['GET', 'PUT', 'PATCH', 'DELETE'])
+def handle_well(well_id):
+    """
+    Endpoint for handling operations on a single well (Read, Update, Delete).
+    """
+    well = Well.query.get_or_404(well_id)
+
+    if request.method == 'GET':
+        # --- Retrieve a single well ---
+        return jsonify(well_schema.dump(well))
+
+    if request.method in ['PUT', 'PATCH']:
+        # --- Update an existing well ---
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No input data provided"}), 400
+        
+        is_partial = request.method == 'PATCH'
+        try:
+            updated_well = well_schema.load(data, instance=well, partial=is_partial, session=db.session)
+            db.session.commit()
+            return jsonify(well_schema.dump(updated_well))
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "Failed to update well", "messages": str(e)}), 400
+
+    if request.method == 'DELETE':
+        # --- Delete a well ---
+        try:
+            db.session.delete(well)
+            db.session.commit()
+            return '', 204
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "Failed to delete well", "messages": str(e)}), 500
+
+
+@wells_bp.route('/<uuid:well_id>/attendance', methods=['POST'])
+def submit_attendance(well_id):
+    """
+    Submit attendance for a well by incrementing current_load.
+    """
+    try:
+        well = Well.query.get_or_404(well_id)
+        well.current_load += 1
+        db.session.commit()
+        
+        response = {
+            'success': True,
+            'current_load': well.current_load,
+            'capacity': well.capacity,
+            'is_near_capacity': well.current_load >= well.capacity * 0.8 if well.capacity else False
+        }
+        return jsonify(response)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Submit attendance error: {e}", exc_info=True)
+        return jsonify({'error': 'Server error'}), 500
+
+
+# --- --- --- --- --- --- --- --- --- --- ---
+# --- --- --- NEW ENDPOINT HERE --- ---
+# --- --- --- --- --- --- --- --- --- --- ---
 
 @wells_bp.route('/map', methods=['GET'])
 def get_wells_for_map():
-    """Get all wells with their locations and status for the map"""
+    """
+    Get wells data formatted for map display.
+    """
     try:
-        query = """
+        # Use raw SQL to extract coordinates from PostGIS binary format
+        from sqlalchemy import text
+        
+        # Query wells with coordinates and circular service areas
+        query = text("""
             SELECT 
                 id,
-                ST_X(location::geometry) as longitude,
-                ST_Y(location::geometry) as latitude,
+                ST_Y(location) as latitude,
+                ST_X(location) as longitude,
                 status,
                 capacity,
                 current_load,
-                service_area
+                service_area,
+                -- Create circular service area around each well
+                ST_AsText(ST_Buffer(location::geography, 1000)::geometry) as circular_service_area
             FROM wells
-            WHERE status != 'draft'
-            ORDER BY created_at DESC
-        """
+        """)
         
-        cursor = db.session.connection().connection.cursor()
-        cursor.execute(query)
-        wells = cursor.fetchall()
+        result = db.session.execute(query)
+        wells_data = result.fetchall()
         
-        wells_data = []
-        for well in wells:
-            # Calculate usage percentage
-            capacity = well[4] or 0
-            current_load = well[5] or 0
-            usage_percentage = (current_load / capacity * 100) if capacity > 0 else 0
+        # Format wells data for map display
+        map_wells = []
+        for well in wells_data:
+            # Parse circular service area coordinates
+            circular_coords = []
+            if well.circular_service_area:
+                import re
+                # Parse POLYGON((lng1 lat1, lng2 lat2, ...)) format
+                polygon_match = re.search(r'POLYGON\(\(([^)]+)\)\)', well.circular_service_area)
+                if polygon_match:
+                    coords_str = polygon_match.group(1)
+                    # Split by comma and parse each coordinate pair
+                    coord_pairs = coords_str.split(',')
+                    for pair in coord_pairs:
+                        parts = pair.strip().split()
+                        if len(parts) >= 2:
+                            lng = float(parts[0])
+                            lat = float(parts[1])
+                            circular_coords.append([lat, lng])  # Leaflet expects [lat, lng]
             
-            # Determine status color based on status and usage
-            status_color = get_status_color(well[3], usage_percentage)
-            
-            wells_data.append({
-                'id': well[0],
-                'longitude': float(well[1]) if well[1] is not None else 0,
-                'latitude': float(well[2]) if well[2] is not None else 0,
-                'status': well[3],
-                'capacity': capacity,
-                'current_load': current_load,
-                'usage_percentage': round(usage_percentage, 1),
-                'status_color': status_color,
-                'service_area': well[6] if well[6] else None
-            })
+            map_well = {
+                'id': str(well.id),
+                'latitude': float(well.latitude),
+                'longitude': float(well.longitude),
+                'status': well.status,
+                'capacity': well.capacity,
+                'current_load': well.current_load,
+                'usage_percentage': well.current_load / well.capacity * 100 if well.capacity > 0 else 0,
+                'status_color': '#10B981' if well.status == 'completed' else '#EF4444',
+                'service_area': well.service_area,
+                'circular_service_area': circular_coords
+            }
+            map_wells.append(map_well)
         
-        cursor.close()
-        return jsonify(wells_data)
-        
+        current_app.logger.info(f"Retrieved {len(map_wells)} wells for map display")
+        return jsonify(map_wells)
     except Exception as e:
-        print(f"Get wells for map error: {e}")
-        return jsonify({'error': 'Server error'}), 500
+        current_app.logger.error(f"Error getting wells for map: {e}", exc_info=True)
+        return jsonify({"error": "Failed to get wells for map"}), 500
 
-def get_status_color(status: str, usage_percentage: float) -> str:
-    """Get the color for a well's marker based on its status and usage"""
-    if status == 'broken':
-        return '#EF4444'  # Red
-    elif status == 'under_maintenance':
-        return '#F59E0B'  # Yellow
-    elif status == 'building':
-        return '#6366F1'  # Indigo
-    elif status == 'completed':
-        if usage_percentage >= 90:
-            return '#DC2626'  # Red
-        elif usage_percentage >= 75:
-            return '#F59E0B'  # Yellow
-        else:
-            return '#10B981'  # Green
-    else:
-        return '#6B7280'  # Gray
 
-@wells_bp.route('/<well_id>/attendance', methods=['POST'])
-def submit_attendance(well_id):
-    """Submit attendance for a well by incrementing current_load"""
+@wells_bp.route('/<uuid:well_id>/update-weight', methods=['POST'])
+def update_well_weight(well_id):
+    """
+    Updates a well's capacity (weight) based on a relative score
+    and triggers a recalculation of the entire area's service polygons.
+    """
+    data = request.get_json()
+    score = data.get('score')
+
+    if score is None:
+        return jsonify({"error": "Missing 'score' in request body"}), 400
+    
     try:
-        # Update well's current_load
-        update_query = """
-            UPDATE wells
-            SET current_load = current_load + 1,
-                updated_at = NOW()
-            WHERE id = %s
-            RETURNING id, current_load, capacity
-        """
+        score = float(score)
+        if not -1.0 <= score <= 1.0:
+            raise ValueError("Score must be between -1.0 and 1.0")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        well = Well.query.get_or_404(well_id)
         
-        cursor = db.session.connection().connection.cursor()
-        cursor.execute(update_query, [well_id])
-        result = cursor.fetchone()
+        # --- 1. Update the well's capacity ---
+        current_capacity = well.capacity
+        # Apply the relative change
+        new_capacity = current_capacity * (1 + score)
         
-        if not result:
-            return jsonify({'error': 'Well not found'}), 404
-            
-        well_id, current_load, capacity = result
+        # Ensure capacity is an integer and not negative
+        well.capacity = max(0, int(new_capacity)) 
+        
+        # As you described: if score is -1, it implies an issue,
+        # so we also mark the well as broken.
+        if score == -1.0:
+            well.status = 'broken'
+        
         db.session.commit()
-        cursor.close()
-        
-        # Return warning if well is getting full
-        response = {
-            'success': True,
-            'current_load': current_load,
-            'capacity': capacity,
-            'is_near_capacity': current_load >= capacity * 0.8 if capacity else False
-        }
-        
-        return jsonify(response)
-        
+        current_app.logger.info(f"Updated well {well.id} capacity from {current_capacity} to {well.capacity}")
+
+        # --- 2. Trigger recalculation for the entire area ---
+        # This is the most important part.
+        current_app.logger.info(f"Triggering recalculation for area {well.area_id}...")
+        recalculate_service_areas(well.area_id)
+
+        # --- 3. Return the updated well ---
+        return jsonify(well_schema.dump(well))
+
     except Exception as e:
-        print(f"Submit attendance error: {e}")
-        return jsonify({'error': 'Server error'}), 500
+        db.session.rollback()
+        current_app.logger.error(f"Error in update-weight: {e}", exc_info=True)
+        return jsonify({"error": "Failed to update well weight", "message": str(e)}), 500

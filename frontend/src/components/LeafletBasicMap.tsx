@@ -18,6 +18,7 @@ interface Well {
     color: string;
     opacity: number;
   } | string; // Can be PostGIS POLYGON string
+  circular_service_area?: [number, number][];
 }
 
 interface LeafletBasicMapProps {
@@ -73,9 +74,28 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
+    // Helper function to get status color
+    const getStatusColor = (status: string) => {
+      switch (status) {
+        case 'operational':
+          return '#10b981'; // green
+        case 'needs-repair':
+        case 'needs_repair':
+          return '#ef4444'; // red
+        case 'maintenance':
+          return '#f59e0b'; // yellow
+        case 'broken':
+          return '#dc2626'; // dark red
+        default:
+          return '#6b7280'; // gray
+      }
+    };
+
     // Markers and service areas
+    const markers: L.Marker[] = [];
     wells.forEach((well) => {
       const marker = L.marker(well.position, { icon: createWellIcon(well) }).addTo(map);
+      markers.push(marker);
       const popupHtml = `
         <div class="text-center p-2">
           <h3 class="font-semibold text-base mb-1">${well.name}</h3>
@@ -105,24 +125,33 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
       });
 
       // Add service area if defined
-      if (well.serviceArea) {
+      if (well.serviceArea || well.circular_service_area) {
         let serviceAreaLayer;
         
-        if (typeof well.serviceArea === 'string') {
+        // Use circular service area if available (from PostGIS ST_Buffer)
+        if (well.circular_service_area && well.circular_service_area.length > 0) {
+          serviceAreaLayer = L.polygon(well.circular_service_area, {
+            color: well.status_color || '#10B981',
+            fillColor: well.status_color || '#10B981',
+            fillOpacity: 0.2,
+            weight: 2,
+          }).addTo(map);
+        } else if (typeof well.serviceArea === 'string') {
           // Parse PostGIS POLYGON string
           const coordsMatch = well.serviceArea.match(/\(\((.*?)\)\)/);
           if (coordsMatch) {
-            const coords = coordsMatch[1].split(',').map(pair => {
+            const coords: [number, number][] = coordsMatch[1].split(',').map(pair => {
               const [lng, lat] = pair.trim().split(' ').map(Number);
-              return [lat, lng];
+              return [lat, lng] as [number, number];
             });
             serviceAreaLayer = L.polygon(coords, {
               color: well.status_color || '#10B981',
+              fillColor: well.status_color || '#10B981',
               fillOpacity: 0.2,
               weight: 2,
             }).addTo(map);
           }
-        } else {
+        } else if (well.serviceArea && typeof well.serviceArea === 'object') {
           // Use circle for legacy service areas
           serviceAreaLayer = L.circle(well.position, {
             radius: well.serviceArea.radius,
@@ -131,7 +160,6 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
             fillOpacity: well.serviceArea.opacity,
             weight: 2,
           }).addTo(map);
-        
         }
         
         // Add service area info to popup
@@ -149,6 +177,12 @@ const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: Lea
         }
       }
     });
+
+    // Fit map bounds to show all wells
+    if (markers.length > 0) {
+      const group = L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.1));
+    }
 
     // Cleanup
     return () => {

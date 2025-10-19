@@ -1,17 +1,36 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Upload } from "lucide-react";
 import LeafletBasicMap from "@/components/LeafletBasicMap";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { createServiceArea } from "@/lib/utils";
 import 'leaflet/dist/leaflet.css';
 
+interface WellData {
+  id: string;
+  name: string;
+  position: [number, number];
+  status: string;
+  status_color?: string;
+  capacity: number;
+  current_load: number;
+  usage_percentage: number;
+  serviceArea?: {
+    radius: number;
+    color: string;
+    opacity: number;
+  } | string;
+  circular_service_area?: [number, number][];
+  polygon?: [number, number][];
+}
+
 const MapPage = () => {
   const [showServiceAreas, setShowServiceAreas] = useState(true);
+  const [wells, setWells] = useState<WellData[]>([]);
+  const [jsonData, setJsonData] = useState<string>("");
   
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-  const [wells, setWells] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +49,12 @@ const MapPage = () => {
           name: `Well ${well.id}`,
           position: [well.latitude, well.longitude] as [number, number],
           status: well.status === 'completed' ? 'operational' : 'needs-repair',
+          status_color: well.status_color || (well.status === 'completed' ? '#10B981' : '#EF4444'),
+          capacity: well.capacity || 0,
+          current_load: well.current_load || 0,
+          usage_percentage: well.usage_percentage || 0,
           serviceArea: well.service_area ? well.service_area : createServiceArea(300, well.status === 'completed' ? 'operational' : 'needs-repair'),
-          capacity: well.capacity,
-          current_load: well.current_load,
-          usage_percentage: well.usage_percentage,
-          status_color: well.status_color
+          circular_service_area: well.circular_service_area || []
         }));
 
         setWells(transformedWells);
@@ -48,10 +68,45 @@ const MapPage = () => {
     fetchWells();
   }, []);
 
+
+  // Parse JSON data and convert to well format
+  const parseJsonData = (jsonString: string) => {
+    try {
+      const data = JSON.parse(jsonString);
+      const parsedWells: WellData[] = [];
+      
+      Object.entries(data).forEach(([id, coordinates]) => {
+        if (Array.isArray(coordinates) && coordinates.length > 0) {
+          // Calculate center point from polygon coordinates
+          const centerLat = coordinates.reduce((sum, coord) => sum + coord[0], 0) / coordinates.length;
+          const centerLng = coordinates.reduce((sum, coord) => sum + coord[1], 0) / coordinates.length;
+          
+          parsedWells.push({
+            id,
+            name: `Well ${id}`,
+            position: [centerLat, centerLng],
+            status: "operational", // Default status
+            status_color: "#10B981",
+            capacity: 0,
+            current_load: 0,
+            usage_percentage: 0,
+            serviceArea: createServiceArea(300, "operational"),
+            polygon: coordinates as [number, number][]
+          });
+        }
+      });
+      
+      setWells(parsedWells);
+    } catch (error) {
+      console.error("Error parsing JSON data:", error);
+      alert("Invalid JSON format. Please check your data.");
+    }
+  };
+
   // Filter wells based on service area visibility
   const wellsToDisplay = showServiceAreas 
     ? wells 
-    : wells.map(well => ({ ...well, serviceArea: undefined }));
+    : wells.map(well => ({ ...well, polygon: undefined }));
 
   useEffect(() => {
     document.title = "Water Wells Map | Water Well Management";

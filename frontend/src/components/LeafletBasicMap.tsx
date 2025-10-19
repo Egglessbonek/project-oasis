@@ -18,23 +18,17 @@ interface Well {
     color: string;
     opacity: number;
   } | string; // Can be PostGIS POLYGON string
+  // Optional array-based polygon from API: [[lat, lng], ...]
   service_area_coords?: [number, number][];
-}
-
-interface AreaBoundary {
-  id: string;
-  name: string;
-  boundary_coords: [number, number][];
 }
 
 interface LeafletBasicMapProps {
   wells: Well[];
-  areaBoundaries?: AreaBoundary[];
   center?: [number, number];
   zoom?: number;
 }
 
-const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.7431], zoom = 13 }: LeafletBasicMapProps) => {
+const LeafletBasicMap = ({ wells, center = [30.2849, -97.7341], zoom = 15 }: LeafletBasicMapProps) => {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<LeafletMap | null>(null);
   const navigate = useNavigate();
@@ -80,6 +74,30 @@ const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.74
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
+
+    // Deterministic color by id using a vibrant palette for clear distinction
+    const PALETTE = [
+      '#e11d48', // rose-600
+      '#f97316', // orange-500
+      '#10b981', // emerald-500
+      '#06b6d4', // cyan-500
+      '#3b82f6', // blue-500
+      '#8b5cf6', // violet-500
+      '#ec4899', // pink-500
+      '#22c55e', // green-500
+      '#f59e0b', // amber-500
+      '#ef4444', // red-500
+      '#14b8a6', // teal-500
+      '#a855f7', // purple-500
+    ];
+    const colorForId = (id: string) => {
+      let hash = 0;
+      for (let i = 0; i < id.length; i++) {
+        hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+      }
+      const idx = hash % PALETTE.length;
+      return PALETTE[idx];
+    };
 
     // Helper function to get status color
     const getStatusColor = (status: string) => {
@@ -132,22 +150,26 @@ const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.74
       });
 
       // Add service area if defined
-      if (well.serviceArea || well.service_area_coords) {
+      if (well.service_area_coords && well.service_area_coords.length > 2) {
+        const polyColor = colorForId(well.id);
+        // Backend provides [[lat, lng], ...] already in Leaflet order
+        const poly = L.polygon(well.service_area_coords, {
+          color: polyColor,
+          fillColor: polyColor,
+          fillOpacity: 0.2,
+          weight: 2,
+        }).addTo(map);
+        poly.bindPopup(`
+          <div class="text-center p-2">
+            <h4 class="font-semibold text-sm mb-1">Service Area</h4>
+            <p class="text-xs text-gray-600">${well.name}</p>
+            <p class="text-xs text-gray-500">Custom Service Area</p>
+          </div>
+        `);
+      } else if (well.serviceArea) {
         let serviceAreaLayer;
         
-        // Use service area coordinates if available
-        if (well.service_area_coords && well.service_area_coords.length > 0) {
-          try {
-            serviceAreaLayer = L.polygon(well.service_area_coords, {
-              color: well.status_color || '#10B981',
-              fillColor: well.status_color || '#10B981',
-              fillOpacity: 0.2,
-              weight: 2,
-            }).addTo(map);
-          } catch (error) {
-            console.error(`Error rendering service area for well ${well.id}:`, error);
-          }
-        } else if (typeof well.serviceArea === 'string') {
+        if (typeof well.serviceArea === 'string') {
           // Parse PostGIS POLYGON string
           const coordsMatch = well.serviceArea.match(/\(\((.*?)\)\)/);
           if (coordsMatch) {
@@ -155,14 +177,15 @@ const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.74
               const [lng, lat] = pair.trim().split(' ').map(Number);
               return [lat, lng] as [number, number];
             });
+            const polyColor = colorForId(well.id);
             serviceAreaLayer = L.polygon(coords, {
-              color: well.status_color || '#10B981',
-              fillColor: well.status_color || '#10B981',
+              color: polyColor,
+              fillColor: polyColor,
               fillOpacity: 0.2,
               weight: 2,
             }).addTo(map);
           }
-        } else if (well.serviceArea && typeof well.serviceArea === 'object') {
+        } else {
           // Use circle for legacy service areas
           serviceAreaLayer = L.circle(well.position, {
             radius: well.serviceArea.radius,
@@ -171,6 +194,7 @@ const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.74
             fillOpacity: well.serviceArea.opacity,
             weight: 2,
           }).addTo(map);
+        
         }
         
         // Add service area info to popup
@@ -189,62 +213,10 @@ const LeafletBasicMap = ({ wells, areaBoundaries = [], center = [30.2672, -97.74
       }
     });
 
-    // Add area boundaries with shading
-    areaBoundaries.forEach((area) => {
-      if (area.boundary_coords && area.boundary_coords.length > 0) {
-        const areaPolygon = L.polygon(area.boundary_coords, {
-          color: '#1E40AF',
-          weight: 3,
-          opacity: 0.9,
-          fillColor: '#3B82F6',
-          fillOpacity: 0.3,  // Increased opacity for better shading
-          fillRule: 'evenodd'
-        }).addTo(map);
-        
-        // Add popup for area boundary
-        areaPolygon.bindPopup(`
-          <div class="text-center p-2">
-            <h4 class="font-semibold text-sm mb-1">Administrative Area</h4>
-            <p class="text-xs text-gray-600">${area.name}</p>
-            <p class="text-xs text-gray-500">Area ID: ${area.id}</p>
-          </div>
-        `);
-      }
-    });
-
-    // Fit map bounds to show all wells and service areas
-    const allLayers: any[] = [...markers];
-    
-    // Add service area layers to bounds calculation
-    wells.forEach((well) => {
-      if (well.service_area_coords && well.service_area_coords.length > 0) {
-        try {
-          const serviceAreaLayer = L.polygon(well.service_area_coords);
-          allLayers.push(serviceAreaLayer);
-        } catch (error) {
-          console.error(`Error creating service area layer for bounds:`, error);
-        }
-      }
-    });
-    
-    // Add area boundary layers to bounds calculation
-    areaBoundaries.forEach((area) => {
-      if (area.boundary_coords && area.boundary_coords.length > 0) {
-        try {
-          const areaLayer = L.polygon(area.boundary_coords);
-          allLayers.push(areaLayer);
-        } catch (error) {
-          console.error(`Error creating area boundary layer for bounds:`, error);
-        }
-      }
-    });
-    
-    if (allLayers.length > 0) {
-      const group = L.featureGroup(allLayers);
+    // Fit map bounds to show all wells
+    if (markers.length > 0) {
+      const group = L.featureGroup(markers);
       map.fitBounds(group.getBounds().pad(0.1));
-    } else {
-      // If no layers, ensure we're showing the default center (Austin)
-      map.setView(center, zoom);
     }
 
     // Cleanup

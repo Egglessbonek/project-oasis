@@ -151,12 +151,12 @@ def create_well():
         except (ValueError, TypeError):
             return jsonify({'error': 'Invalid coordinates format'}), 400
         
-        # Create well with raw SQL
+        # Create well with raw SQL (weight mirrors capacity initially)
         insert_query = """
             INSERT INTO wells (
-                location, status, capacity, current_load, area_id, service_area, created_at, updated_at
+                location, status, capacity, current_load, area_id, service_area, weight, created_at, updated_at
             ) VALUES (
-                ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s, NOW(), NOW()
+                ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s, %s, NOW(), NOW()
             ) RETURNING id, location, status, capacity, current_load, area_id, service_area, created_at, updated_at
         """
         
@@ -167,7 +167,8 @@ def create_well():
             data['capacity'],
             data['current_load'],
             admin.area_id,
-            data['service_area']
+            data['service_area'],
+            data['capacity']  # weight = capacity
         ])
         
         new_well = cursor.fetchone()
@@ -272,6 +273,11 @@ def update_well(well_id):
         # Add updated_at and where clause values
         update_values.extend([well_id, admin.area_id])
         
+        # If capacity included, also mirror to weight; on status changes alone, keep weight unchanged here
+        if 'capacity' in data:
+            update_fields.append("weight = %s")
+            update_values.append(data['capacity'])
+
         update_query = f"""
             UPDATE wells 
             SET {', '.join(update_fields)}, updated_at = NOW()

@@ -28,7 +28,7 @@ def get_areas():
     return jsonify(result)
 
 
-@areas_bp.route('/<uuid:area_id>/calculate-service-areas', methods=['POST'])
+@areas_bp.route('/<uuid:area_id>/calculate-service-areas', methods=['POST', 'GET'])
 def calculate_areas(area_id):
     """
     Triggers the service area recalculation for a given area.

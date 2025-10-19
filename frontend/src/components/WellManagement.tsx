@@ -91,6 +91,25 @@ const WellManagement = ({ token, onWellAdded }: WellManagementProps) => {
       });
 
       if (response.ok) {
+        // Parse created well to obtain area_id for recalculation
+        const created = await response.json();
+        const areaId = created?.area_id || created?.areaId;
+
+        // Fire-and-forget recalculation (best-effort)
+        if (areaId) {
+          try {
+            await fetch(`${API_BASE_URL}/areas/${areaId}/calculate-service-areas`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+          } catch (_) {
+            // ignore
+          }
+        }
+
         toast({
           title: "Success",
           description: "Well added successfully",

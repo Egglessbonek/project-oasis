@@ -217,6 +217,23 @@ const AdminDashboard = () => {
           title: "Success",
           description: "Well deleted successfully",
         });
+        // Attempt recalculation for the well's area
+        try {
+          const deleted = await response.json();
+          const areaId = deleted?.area_id || deleted?.areaId;
+          if (areaId) {
+            await fetch(`${API_BASE_URL}/areas/${areaId}/calculate-service-areas`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+            });
+          }
+        } catch (_) {
+          // ignore
+        }
         // Refresh dashboard data
         fetchDashboardData();
       } else {
@@ -549,6 +566,21 @@ const AdminDashboard = () => {
                         title: "Success",
                         description: "Well status updated successfully",
                       });
+                      // Recalculate for this well's area
+                      try {
+                        if (editingWell?.area_id) {
+                          await fetch(`${API_BASE_URL}/areas/${editingWell.area_id}/calculate-service-areas`, {
+                            method: 'POST',
+                            headers: {
+                              'Authorization': `Bearer ${token}`,
+                              'Content-Type': 'application/json',
+                            },
+                            credentials: 'include',
+                          });
+                        }
+                      } catch (_) {
+                        // ignore
+                      }
                       fetchDashboardData();
                       setEditingWell(null);
                     } else {

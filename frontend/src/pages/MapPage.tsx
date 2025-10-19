@@ -43,6 +43,8 @@ const MapPage = () => {
           throw new Error('Failed to fetch wells');
         }
         const data = await response.json();
+
+        console.log(data);
         
         // Handle new response structure with wells and area_boundaries
         const wellsData = data.wells || data; // Support both old and new format
@@ -58,7 +60,8 @@ const MapPage = () => {
           capacity: well.capacity || 0,
           current_load: well.current_load || 0,
           usage_percentage: well.usage_percentage || 0,
-          serviceArea: well.service_area ? well.service_area : createServiceArea(300, well.status === 'completed' ? 'operational' : 'needs-repair'),
+          // Backend returns ST_AsText(w.service_area) as service_area_text
+          serviceArea: well.service_area_text || well.service_area || createServiceArea(300, well.status === 'completed' ? 'operational' : 'needs-repair'),
           service_area_coords: well.service_area_coords || []
         }));
 
@@ -160,7 +163,7 @@ const MapPage = () => {
               </Button>
             </div>
           ) : (
-            <LeafletBasicMap wells={wellsToDisplay} areaBoundaries={areaBoundaries} />
+            <LeafletBasicMap wells={wellsToDisplay} />
           )}
         </div>
       </div>

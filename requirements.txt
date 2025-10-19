@@ -1,0 +1,31 @@
+# =============================================================================
+#                            Python Dependencies
+#
+# This file lists all the Python packages our project needs.
+# You can install them all at once by running:
+#   pip install -r requirements.txt
+#
+# =============================================================================
+
+# The core web framework
+Flask
+Flask-SQLAlchemy # Flask integration for SQLAlchemy
+
+# For loading environment variables from a .env file (for our database URL)
+python-dotenv
+
+# The library for interacting with our PostgreSQL database (Object Relational Mapper)
+SQLAlchemy
+
+# The specific Python driver for connecting to a PostgreSQL database
+psycopg2-binary
+
+# Object serialization/deserialization library
+marshmallow
+marshmallow-sqlalchemy # Marshmallow integration for SQLAlchemy
+
+# Support for PostGIS data types in SQLAlchemy
+GeoAlchemy2
+
+# Used by our custom schema field to handle GeoJSON conversion
+Shapely

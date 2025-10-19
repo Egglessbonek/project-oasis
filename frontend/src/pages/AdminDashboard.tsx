@@ -1,87 +1,128 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Search, CheckCircle, AlertTriangle, Clock } from "lucide-react";
+import { ArrowLeft, Search, CheckCircle, AlertTriangle, Clock, LogOut, User } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
-// Mock data for demonstration
-const mockWells = [
-  {
-    id: "WELL-001",
-    location: "North Field A",
-    status: "operational",
-    lastMaintenance: "2025-09-15",
-    issuesCount: 0,
-  },
-  {
-    id: "WELL-002",
-    location: "South Field B",
-    status: "needs-attention",
-    lastMaintenance: "2025-08-20",
-    issuesCount: 2,
-    issues: [
-      { type: "Low Water Pressure", reportedAt: "2025-10-15", priority: "medium" },
-      { type: "Mechanical Issue", reportedAt: "2025-10-14", priority: "high" },
-    ],
-  },
-  {
-    id: "WELL-003",
-    location: "East Field C",
-    status: "operational",
-    lastMaintenance: "2025-09-30",
-    issuesCount: 0,
-  },
-  {
-    id: "WELL-004",
-    location: "West Field D",
-    status: "critical",
-    lastMaintenance: "2025-07-10",
-    issuesCount: 1,
-    issues: [
-      { type: "No Water Flow", reportedAt: "2025-10-16", priority: "critical" },
-    ],
-  },
-  {
-    id: "WELL-005",
-    location: "Central Field E",
-    status: "operational",
-    lastMaintenance: "2025-10-01",
-    issuesCount: 0,
-  },
-];
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+interface Well {
+  id: string;
+  location: string;
+  status: string;
+  capacity: number;
+  current_load: number;
+  area_id: string;
+  service_area: string;
+  created_at: string;
+  updated_at: string;
+  issue_count: number;
+}
+
+interface Report {
+  id: string;
+  summary: string;
+  status: string;
+  fix_priority: number;
+  created_at: string;
+  image_url?: string;
+  well_id: string;
+  well_longitude: number;
+  well_latitude: number;
+}
+
+interface DashboardData {
+  wells: Well[];
+  reports: Report[];
+  stats: {
+    total: number;
+    operational: number;
+    broken: number;
+    maintenance: number;
+    building: number;
+    draft: number;
+  };
+}
 
 const AdminDashboard = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const { user, token, logout } = useAuth();
 
-  const filteredWells = mockWells.filter(
+  // Fetch dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/admin/dashboard`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setDashboardData(data);
+        } else {
+          setError('Failed to load dashboard data');
+        }
+      } catch (err) {
+        setError('Network error. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (token) {
+      fetchDashboardData();
+    }
+  }, [token]);
+
+  const filteredWells = dashboardData?.wells.filter(
     (well) =>
-      well.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      well.location.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      well.id.toLowerCase().includes(searchTerm.toLowerCase())
+  ) || [];
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "operational":
+      case "completed":
         return (
           <Badge className="bg-accent/20 text-accent-foreground hover:bg-accent/30">
             <CheckCircle className="mr-1 h-3 w-3" />
             Operational
           </Badge>
         );
-      case "needs-attention":
-        return (
-          <Badge className="bg-primary/20 text-primary hover:bg-primary/30">
-            <Clock className="mr-1 h-3 w-3" />
-            Needs Attention
-          </Badge>
-        );
-      case "critical":
+      case "broken":
         return (
           <Badge className="bg-destructive/20 text-destructive hover:bg-destructive/30">
             <AlertTriangle className="mr-1 h-3 w-3" />
-            Critical
+            Broken
+          </Badge>
+        );
+      case "under_maintenance":
+        return (
+          <Badge className="bg-primary/20 text-primary hover:bg-primary/30">
+            <Clock className="mr-1 h-3 w-3" />
+            Maintenance
+          </Badge>
+        );
+      case "building":
+        return (
+          <Badge className="bg-yellow-500/20 text-yellow-600 hover:bg-yellow-500/30">
+            <Clock className="mr-1 h-3 w-3" />
+            Building
+          </Badge>
+        );
+      case "draft":
+        return (
+          <Badge variant="outline">
+            Draft
           </Badge>
         );
       default:
@@ -89,24 +130,52 @@ const AdminDashboard = () => {
     }
   };
 
-  const getPriorityBadge = (priority: string) => {
-    switch (priority) {
-      case "critical":
-        return <Badge variant="destructive">Critical</Badge>;
-      case "high":
-        return <Badge className="bg-destructive/70 hover:bg-destructive/80">High</Badge>;
-      case "medium":
-        return <Badge className="bg-primary/70 hover:bg-primary/80">Medium</Badge>;
-      default:
-        return <Badge variant="outline">{priority}</Badge>;
+  const getPriorityBadge = (priority: number) => {
+    if (priority >= 1000) {
+      return <Badge variant="destructive">Critical</Badge>;
+    } else if (priority >= 500) {
+      return <Badge className="bg-destructive/70 hover:bg-destructive/80">High</Badge>;
+    } else if (priority >= 100) {
+      return <Badge className="bg-primary/70 hover:bg-primary/80">Medium</Badge>;
+    } else {
+      return <Badge variant="outline">Low</Badge>;
     }
   };
 
-  const stats = {
-    total: mockWells.length,
-    operational: mockWells.filter((w) => w.status === "operational").length,
-    needsAttention: mockWells.filter((w) => w.status === "needs-attention").length,
-    critical: mockWells.filter((w) => w.status === "critical").length,
+  const handleLogout = async () => {
+    await logout();
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="text-muted-foreground">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <AlertTriangle className="h-12 w-12 text-destructive mx-auto" />
+          <p className="text-destructive">{error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const stats = dashboardData?.stats || {
+    total: 0,
+    operational: 0,
+    broken: 0,
+    maintenance: 0,
+    building: 0,
+    draft: 0,
   };
 
   return (
@@ -119,14 +188,23 @@ const AdminDashboard = () => {
             <span className="font-medium">Back to Home</span>
           </Link>
           <h1 className="text-xl font-bold text-foreground">Admin Dashboard</h1>
-          <div className="w-24" /> {/* Spacer */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <User className="h-4 w-4" />
+              <span>{user?.email}</span>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* Dashboard Content */}
       <section className="container mx-auto px-4 py-8">
         {/* Stats Overview */}
-        <div className="mb-8 grid gap-4 md:grid-cols-4">
+        <div className="mb-8 grid gap-4 md:grid-cols-6">
           <Card className="p-6">
             <div className="text-2xl font-bold text-foreground">{stats.total}</div>
             <div className="text-sm text-muted-foreground">Total Wells</div>
@@ -136,12 +214,20 @@ const AdminDashboard = () => {
             <div className="text-sm text-muted-foreground">Operational</div>
           </Card>
           <Card className="p-6">
-            <div className="text-2xl font-bold text-primary">{stats.needsAttention}</div>
-            <div className="text-sm text-muted-foreground">Needs Attention</div>
+            <div className="text-2xl font-bold text-destructive">{stats.broken}</div>
+            <div className="text-sm text-muted-foreground">Broken</div>
           </Card>
           <Card className="p-6">
-            <div className="text-2xl font-bold text-destructive">{stats.critical}</div>
-            <div className="text-sm text-muted-foreground">Critical Issues</div>
+            <div className="text-2xl font-bold text-primary">{stats.maintenance}</div>
+            <div className="text-sm text-muted-foreground">Maintenance</div>
+          </Card>
+          <Card className="p-6">
+            <div className="text-2xl font-bold text-yellow-600">{stats.building}</div>
+            <div className="text-sm text-muted-foreground">Building</div>
+          </Card>
+          <Card className="p-6">
+            <div className="text-2xl font-bold text-muted-foreground">{stats.draft}</div>
+            <div className="text-sm text-muted-foreground">Draft</div>
           </Card>
         </div>
 
@@ -168,41 +254,25 @@ const AdminDashboard = () => {
                     <h3 className="text-xl font-semibold text-foreground">{well.id}</h3>
                     {getStatusBadge(well.status)}
                   </div>
-                  <p className="text-muted-foreground">{well.location}</p>
+                  <p className="text-muted-foreground">
+                    Location: {well.location}
+                  </p>
                   <p className="text-sm text-muted-foreground">
-                    Last Maintenance: {new Date(well.lastMaintenance).toLocaleDateString()}
+                    Capacity: {well.capacity} | Load: {well.current_load}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Updated: {new Date(well.updated_at).toLocaleDateString()}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-4">
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Active Issues</div>
-                    <div className="text-2xl font-bold text-foreground">{well.issuesCount}</div>
+                    <div className="text-2xl font-bold text-foreground">{well.issue_count}</div>
                   </div>
                   <Button variant="hero">View Details</Button>
                 </div>
               </div>
-
-              {/* Issues List */}
-              {well.issues && well.issues.length > 0 && (
-                <div className="mt-4 space-y-2 border-t pt-4">
-                  <h4 className="text-sm font-medium text-foreground">Recent Issues:</h4>
-                  {well.issues.map((issue, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between rounded-md bg-muted/50 p-3"
-                    >
-                      <div>
-                        <div className="font-medium text-foreground">{issue.type}</div>
-                        <div className="text-sm text-muted-foreground">
-                          Reported: {new Date(issue.reportedAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                      {getPriorityBadge(issue.priority)}
-                    </div>
-                  ))}
-                </div>
-              )}
             </Card>
           ))}
         </div>

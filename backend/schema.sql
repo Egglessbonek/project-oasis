@@ -14,7 +14,6 @@ CREATE TYPE report_status AS ENUM (
     'in_progress',
     'fixed'
 );
-
                                                         ---------------- TABLES -----------------
 
 -- Areas Table: Defines a geographic administrative region (e.g., 'Travis County').
@@ -33,7 +32,13 @@ CREATE TABLE admins (
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash TEXT NOT NULL, -- Never store plain text passwords!
     area_id UUID REFERENCES areas(id) ON DELETE RESTRICT, -- An admin must be assigned to an area.
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    is_admin BOOLEAN NOT NULL DEFAULT TRUE, -- Flag to check if user is an admin
+    oauth_id VARCHAR(255), -- OAuth provider's user ID
+    access_token TEXT, -- OAuth access token (encrypted)
+    refresh_token TEXT, -- OAuth refresh token (encrypted)
+    token_expires_at TIMESTAMPTZ, -- When the access token expires
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Wells Table: The core table for every water well.
@@ -107,8 +112,8 @@ INSERT INTO areas (name, boundary) VALUES
 
 -- Insert a sample admin for this area
 -- Note: In a real app, the password would be properly hashed by the backend.
-INSERT INTO admins (email, password_hash, area_id) VALUES
-('admin@travis.gov', 'replace_with_a_real_bcrypt_hash', (SELECT id from areas WHERE name = 'Travis County'));
+INSERT INTO admins (email, password_hash, area_id, is_admin) VALUES
+('admin@travis.gov', 'replace_with_a_real_bcrypt_hash', (SELECT id from areas WHERE name = 'Travis County'), TRUE);
 
 -- Insert a few wells
 INSERT INTO wells (location, status, capacity, current_load, area_id, service_area) VALUES

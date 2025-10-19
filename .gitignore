@@ -14,3 +14,6 @@ build/
 .cursorindexingignore
 .vite/
 permissions.sql
+
+.venv/
+__pycache__/

@@ -12,6 +12,7 @@ load_dotenv()
 # Import blueprints
 from routes.auth import auth_bp
 from routes.admin import admin_bp
+from routes.reports import reports_bp
 from models import db
 
 def create_app():
@@ -59,6 +60,7 @@ def create_app():
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
+    app.register_blueprint(reports_bp, url_prefix='/api/reports')
     
     # Health check endpoint
     @app.route('/api/health')

@@ -3,15 +3,21 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Search, CheckCircle, AlertTriangle, Clock, LogOut, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/components/ui/use-toast";
+import WellManagement from "@/components/WellManagement";
+import WellComments from "@/components/WellComments";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 interface Well {
   id: string;
-  location: string;
+  latitude: number;
+  longitude: number;
   status: string;
   capacity: number;
   current_load: number;
@@ -20,6 +26,7 @@ interface Well {
   created_at: string;
   updated_at: string;
   issue_count: number;
+  comments: string[];
 }
 
 interface Report {
@@ -52,33 +59,36 @@ const AdminDashboard = () => {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editingWell, setEditingWell] = useState<Well | null>(null);
   const { user, token, logout } = useAuth();
+  const { toast } = useToast();
 
   // Fetch dashboard data
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/admin/dashboard`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        });
+  const fetchDashboardData = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/dashboard`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
 
-        if (response.ok) {
-          const data = await response.json();
-          setDashboardData(data);
-        } else {
-          setError('Failed to load dashboard data');
-        }
-      } catch (err) {
-        setError('Network error. Please try again.');
-      } finally {
-        setLoading(false);
+      if (response.ok) {
+        const data = await response.json();
+        setDashboardData(data);
+      } else {
+        setError('Failed to load dashboard data');
       }
-    };
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // Load dashboard data on mount and when token changes
+  useEffect(() => {
     if (token) {
       fetchDashboardData();
     }
@@ -146,6 +156,42 @@ const AdminDashboard = () => {
     await logout();
   };
 
+  const handleDeleteWell = async (wellId: string) => {
+    if (!confirm('Are you sure you want to delete this well? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/wells/${wellId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Well deleted successfully",
+        });
+        // Refresh dashboard data
+        fetchDashboardData();
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete well');
+      }
+    } catch (error) {
+      console.error('Delete well error:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to delete well',
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -170,12 +216,12 @@ const AdminDashboard = () => {
   }
 
   const stats = dashboardData?.stats || {
-    total: 0,
-    operational: 0,
-    broken: 0,
-    maintenance: 0,
-    building: 0,
-    draft: 0,
+    total: '-',
+    operational: '-',
+    broken: '-',
+    maintenance: '-',
+    building: '-',
+    draft: '-'
   };
 
   return (
@@ -231,6 +277,9 @@ const AdminDashboard = () => {
           </Card>
         </div>
 
+        {/* Well Management */}
+        <WellManagement token={token} onWellAdded={() => fetchDashboardData()} />
+
         {/* Search Bar */}
         <div className="mb-6">
           <div className="relative">
@@ -249,28 +298,37 @@ const AdminDashboard = () => {
           {filteredWells.map((well) => (
             <Card key={well.id} className="p-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-xl font-semibold text-foreground">{well.id}</h3>
-                    {getStatusBadge(well.status)}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-xl font-semibold text-foreground">{well.id}</h3>
+                      {getStatusBadge(well.status)}
+                    </div>
+                    <p className="text-muted-foreground">
+                      Location: {`${well.latitude.toFixed(6)}, ${well.longitude.toFixed(6)}`}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Capacity: {well.capacity} | Load: {well.current_load}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Updated: {new Date(well.updated_at).toLocaleDateString()}
+                    </p>
                   </div>
-                  <p className="text-muted-foreground">
-                    Location: {well.location}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Capacity: {well.capacity} | Load: {well.current_load}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Updated: {new Date(well.updated_at).toLocaleDateString()}
-                  </p>
-                </div>
 
                 <div className="flex items-center gap-4">
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Active Issues</div>
                     <div className="text-2xl font-bold text-foreground">{well.issue_count}</div>
                   </div>
-                  <Button variant="hero">View Details</Button>
+                  <div className="flex gap-2">
+                    <Button variant="destructive" onClick={() => handleDeleteWell(well.id)}>Delete</Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => setEditingWell(well)}
+                    >
+                      Edit Status
+                    </Button>
+                    <WellComments comments={well.comments || []} />
+                  </div>
                 </div>
               </div>
             </Card>
@@ -283,6 +341,65 @@ const AdminDashboard = () => {
           </Card>
         )}
       </section>
+
+      {/* Edit Status Dialog */}
+      <Dialog open={editingWell !== null} onOpenChange={(open) => !open && setEditingWell(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Well Status</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <h4 className="font-medium">Current Status: {getStatusBadge(editingWell?.status || 'draft')}</h4>
+              <Select
+                value={editingWell?.status}
+                onValueChange={async (value) => {
+                  if (!editingWell) return;
+
+                  try {
+                    const response = await fetch(`${API_BASE_URL}/admin/wells/${editingWell.id}`, {
+                      method: 'PUT',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({ status: value })
+                    });
+
+                    if (response.ok) {
+                      toast({
+                        title: "Success",
+                        description: "Well status updated successfully",
+                      });
+                      fetchDashboardData();
+                      setEditingWell(null);
+                    } else {
+                      throw new Error('Failed to update well status');
+                    }
+                  } catch (error) {
+                    toast({
+                      variant: "destructive",
+                      title: "Error",
+                      description: error instanceof Error ? error.message : 'Failed to update well status',
+                    });
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select new status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="building">Building</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="broken">Broken</SelectItem>
+                  <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

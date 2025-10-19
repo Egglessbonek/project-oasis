@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, Admin, Well, BreakageReport, Area
-from sqlalchemy import func, text
+from models import db, Admin, Well, Area
+from datetime import datetime
 import os
 
 admin_bp = Blueprint('admin', __name__)
@@ -39,7 +39,8 @@ def get_dashboard_data():
         wells_query = """
             SELECT 
                 w.id,
-                w.location,
+                ST_X(w.location::geometry) as longitude,
+                ST_Y(w.location::geometry) as latitude,
                 w.status,
                 w.capacity,
                 w.current_load,
@@ -65,15 +66,16 @@ def get_dashboard_data():
         for well in wells:
             wells_data.append({
                 'id': well[0],
-                'location': well[1],
-                'status': well[2],
-                'capacity': well[3],
-                'current_load': well[4],
-                'area_id': well[5],
-                'service_area': well[6],
-                'created_at': well[7].isoformat() if well[7] else None,
-                'updated_at': well[8].isoformat() if well[8] else None,
-                'issue_count': well[9]
+                'longitude': float(well[1]) if well[1] is not None else 0,
+                'latitude': float(well[2]) if well[2] is not None else 0,
+                'status': well[3],
+                'capacity': well[4],
+                'current_load': well[5],
+                'area_id': well[6],
+                'service_area': well[7],
+                'created_at': well[8].isoformat() if well[8] else None,
+                'updated_at': well[9].isoformat() if well[9] else None,
+                'issue_count': well[10]
             })
         
         # Get statistics
@@ -113,189 +115,213 @@ def get_dashboard_data():
         print(f"Dashboard error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
-@admin_bp.route('/wells', methods=['GET'])
-@jwt_required()
-@require_admin
-def get_wells():
-    """Get wells list"""
-    try:
-        admin = request.current_admin
-        
-        # Get query parameters
-        status = request.args.get('status')
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
-        
-        # Build query
-        query = Well.query.filter_by(area_id=admin.area_id)
-        
-        if status:
-            query = query.filter_by(status=status)
-        
-        wells = query.order_by(Well.created_at.desc()).offset(offset).limit(limit).all()
-        
-        wells_data = []
-        for well in wells:
-            # Get issue count
-            issue_count = BreakageReport.query.filter(
-                BreakageReport.well_id == well.id,
-                BreakageReport.status != 'fixed'
-            ).count()
-            
-            wells_data.append({
-                'id': well.id,
-                'status': well.status,
-                'capacity': well.capacity,
-                'current_load': well.current_load,
-                'location': well.location,
-                'created_at': well.created_at.isoformat() if well.created_at else None,
-                'updated_at': well.updated_at.isoformat() if well.updated_at else None,
-                'issue_count': issue_count
-            })
-        
-        return jsonify(wells_data)
-        
-    except Exception as e:
-        print(f"Wells list error: {e}")
-        return jsonify({'error': 'Server error'}), 500
+def coordinates_to_point(latitude: float, longitude: float) -> str:
+    """Convert latitude and longitude to PostGIS POINT format"""
+    return f"POINT({longitude} {latitude})"
 
-@admin_bp.route('/reports', methods=['GET'])
+@admin_bp.route('/wells', methods=['POST'])
 @jwt_required()
 @require_admin
-def get_reports():
-    """Get breakage reports"""
-    try:
-        admin = request.current_admin
-        
-        # Get query parameters
-        status = request.args.get('status')
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
-        
-        # Build query
-        query = db.session.query(BreakageReport).join(
-            Well, BreakageReport.well_id == Well.id
-        ).filter(Well.area_id == admin.area_id)
-        
-        if status:
-            query = query.filter(BreakageReport.status == status)
-        
-        reports = query.order_by(
-            BreakageReport.fix_priority.desc(), 
-            BreakageReport.created_at.desc()
-        ).offset(offset).limit(limit).all()
-        
-        reports_data = []
-        for report in reports:
-            reports_data.append(report.to_dict())
-        
-        return jsonify(reports_data)
-        
-    except Exception as e:
-        print(f"Reports list error: {e}")
-        return jsonify({'error': 'Server error'}), 500
-
-@admin_bp.route('/wells/<well_id>/status', methods=['PUT'])
-@jwt_required()
-@require_admin
-def update_well_status(well_id):
-    """Update well status"""
+def create_well():
+    """Create a new well"""
     try:
         admin = request.current_admin
         data = request.get_json()
-        status = data.get('status')
+        
+        # Validate required fields
+        required_fields = ['latitude', 'longitude', 'status', 'capacity', 'current_load', 'service_area']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
         
         # Validate status
         valid_statuses = ['draft', 'building', 'completed', 'broken', 'under_maintenance']
-        if status not in valid_statuses:
+        if data['status'] not in valid_statuses:
             return jsonify({'error': 'Invalid status'}), 400
         
-        # Find well in admin's area
-        well = Well.query.filter_by(
-            id=well_id, 
-            area_id=admin.area_id
-        ).first()
+        # Validate coordinates
+        try:
+            latitude = float(data['latitude'])
+            longitude = float(data['longitude'])
+            if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+                return jsonify({'error': 'Invalid coordinates'}), 400
+            point_location = coordinates_to_point(latitude, longitude)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid coordinates format'}), 400
         
-        if not well:
-            return jsonify({'error': 'Well not found'}), 404
+        # Create well with raw SQL
+        insert_query = """
+            INSERT INTO wells (
+                location, status, capacity, current_load, area_id, service_area, created_at, updated_at
+            ) VALUES (
+                ST_GeomFromText(%s, 4326), %s, %s, %s, %s, %s, NOW(), NOW()
+            ) RETURNING id, location, status, capacity, current_load, area_id, service_area, created_at, updated_at
+        """
         
-        # Update status
-        well.status = status
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(insert_query, [
+            point_location,  # Use converted point location
+            data['status'],
+            data['capacity'],
+            data['current_load'],
+            admin.area_id,
+            data['service_area']
+        ])
+        
+        new_well = cursor.fetchone()
         db.session.commit()
         
-        return jsonify({
-            'id': well.id,
-            'status': well.status,
-            'updated_at': well.updated_at.isoformat() if well.updated_at else None
-        })
+        well_data = {
+            'id': new_well[0],
+            'location': new_well[1],
+            'status': new_well[2],
+            'capacity': new_well[3],
+            'current_load': new_well[4],
+            'area_id': new_well[5],
+            'service_area': new_well[6],
+            'created_at': new_well[7].isoformat() if new_well[7] else None,
+            'updated_at': new_well[8].isoformat() if new_well[8] else None
+        }
+        
+        cursor.close()
+        return jsonify(well_data), 201
         
     except Exception as e:
-        db.session.rollback()
-        print(f"Update well status error: {e}")
+        print(f"Create well error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
-@admin_bp.route('/reports/<report_id>/status', methods=['PUT'])
+@admin_bp.route('/wells/<well_id>', methods=['PUT'])
 @jwt_required()
 @require_admin
-def update_report_status(report_id):
-    """Update report status"""
+def update_well(well_id):
+    """Update a well"""
     try:
         admin = request.current_admin
         data = request.get_json()
-        status = data.get('status')
         
-        # Validate status
-        valid_statuses = ['reported', 'in_progress', 'fixed']
-        if status not in valid_statuses:
-            return jsonify({'error': 'Invalid status'}), 400
+        # Validate status if provided
+        if 'status' in data:
+            valid_statuses = ['draft', 'building', 'completed', 'broken', 'under_maintenance']
+            if data['status'] not in valid_statuses:
+                return jsonify({'error': 'Invalid status'}), 400
         
-        # Find report in admin's area
-        report = db.session.query(BreakageReport).join(
-            Well, BreakageReport.well_id == Well.id
-        ).filter(
-            BreakageReport.id == report_id,
-            Well.area_id == admin.area_id
-        ).first()
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        update_values = []
+        valid_fields = ['location', 'status', 'capacity', 'current_load', 'service_area']
         
-        if not report:
-            return jsonify({'error': 'Report not found'}), 404
+        for field in valid_fields:
+            if field in data:
+                update_fields.append(f"{field} = %s")
+                update_values.append(data[field])
         
-        # Update status
-        report.status = status
+        if not update_fields:
+            return jsonify({'error': 'No valid fields to update'}), 400
+        
+        # Add updated_at and where clause values
+        update_values.extend([well_id, admin.area_id])
+        
+        update_query = f"""
+            UPDATE wells 
+            SET {', '.join(update_fields)}, updated_at = NOW()
+            WHERE id = %s AND area_id = %s
+            RETURNING id, location, status, capacity, current_load, area_id, service_area, created_at, updated_at
+        """
+        
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(update_query, update_values)
+        
+        updated_well = cursor.fetchone()
+        if not updated_well:
+            return jsonify({'error': 'Well not found or unauthorized'}), 404
+        
         db.session.commit()
         
-        return jsonify({
-            'id': report.id,
-            'status': report.status
-        })
+        well_data = {
+            'id': updated_well[0],
+            'location': updated_well[1],
+            'status': updated_well[2],
+            'capacity': updated_well[3],
+            'current_load': updated_well[4],
+            'area_id': updated_well[5],
+            'service_area': updated_well[6],
+            'created_at': updated_well[7].isoformat() if updated_well[7] else None,
+            'updated_at': updated_well[8].isoformat() if updated_well[8] else None
+        }
+        
+        cursor.close()
+        return jsonify(well_data)
         
     except Exception as e:
-        db.session.rollback()
-        print(f"Update report status error: {e}")
+        print(f"Update well error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
-@admin_bp.route('/profile', methods=['GET'])
+@admin_bp.route('/wells/<well_id>', methods=['DELETE'])
 @jwt_required()
 @require_admin
-def get_profile():
-    """Get admin profile"""
+def delete_well(well_id):
+    """Delete a well"""
     try:
         admin = request.current_admin
         
-        # Get area name
-        area = Area.query.filter_by(id=admin.area_id).first()
+        delete_query = """
+            DELETE FROM wells
+            WHERE id = %s AND area_id = %s
+            RETURNING id
+        """
         
-        profile_data = {
-            'id': admin.id,
-            'email': admin.email,
-            'area_id': admin.area_id,
-            'area_name': area.name if area else None,
-            'is_admin': admin.is_admin,
-            'created_at': admin.created_at.isoformat() if admin.created_at else None
-        }
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(delete_query, [well_id, admin.area_id])
         
-        return jsonify(profile_data)
+        deleted = cursor.fetchone()
+        if not deleted:
+            return jsonify({'error': 'Well not found or unauthorized'}), 404
+        
+        db.session.commit()
+        cursor.close()
+        
+        return jsonify({'message': 'Well deleted successfully'})
         
     except Exception as e:
-        print(f"Get profile error: {e}")
+        print(f"Delete well error: {e}")
+        return jsonify({'error': 'Server error'}), 500
+
+@admin_bp.route('/wells/available', methods=['GET'])
+def get_available_wells():
+    """Get list of available wells for reporting"""
+    try:
+        # Get only completed wells
+        query = """
+            SELECT 
+                id,
+                ST_X(location::geometry) as longitude,
+                ST_Y(location::geometry) as latitude,
+                status,
+                capacity,
+                current_load
+            FROM wells 
+            WHERE status IN ('completed', 'broken', 'under_maintenance')
+            ORDER BY created_at DESC
+        """
+        
+        cursor = db.session.connection().connection.cursor()
+        cursor.execute(query)
+        wells = cursor.fetchall()
+        
+        wells_data = []
+        for well in wells:
+            wells_data.append({
+                'id': well[0],
+                'longitude': float(well[1]) if well[1] is not None else 0,
+                'latitude': float(well[2]) if well[2] is not None else 0,
+                'status': well[3],
+                'capacity': well[4],
+                'current_load': well[5]
+            })
+        
+        cursor.close()
+        return jsonify(wells_data)
+        
+    except Exception as e:
+        print(f"Get available wells error: {e}")
         return jsonify({'error': 'Server error'}), 500

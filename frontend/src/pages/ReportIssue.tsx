@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Send } from "lucide-react";
 import { Link } from "react-router-dom";
+import WellSelector from "@/components/WellSelector";
 
 const ReportIssue = () => {
   const { toast } = useToast();
@@ -19,7 +20,10 @@ const ReportIssue = () => {
     contactPhone: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validate form
@@ -32,20 +36,43 @@ const ReportIssue = () => {
       return;
     }
 
-    // Success toast
-    toast({
-      title: "Issue Reported",
-      description: "Your issue has been submitted successfully. We'll address it soon.",
-    });
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/reports`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
 
-    // Reset form
-    setFormData({
-      wellId: "",
-      issueType: "",
-      description: "",
-      contactName: "",
-      contactPhone: "",
-    });
+      if (response.ok) {
+        toast({
+          title: "Issue Reported",
+          description: "Your issue has been submitted successfully. We'll address it soon.",
+        });
+
+        // Reset form
+        setFormData({
+          wellId: "",
+          issueType: "",
+          description: "",
+          contactName: "",
+          contactPhone: "",
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to submit report');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to submit report',
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -75,18 +102,10 @@ const ReportIssue = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <Label htmlFor="wellId">Well ID *</Label>
-                <Input
-                  id="wellId"
-                  placeholder="e.g., WELL-001"
-                  value={formData.wellId}
-                  onChange={(e) => setFormData({ ...formData, wellId: e.target.value })}
-                  className="mt-2"
-                  required
-                />
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Find this ID on your well's QR code or identification plate
-                </p>
+                <Label>Select Well *</Label>
+                <div className="mt-2">
+                  <WellSelector onWellSelect={(wellId) => setFormData({ ...formData, wellId })} />
+                </div>
               </div>
 
               <div>
@@ -148,9 +167,14 @@ const ReportIssue = () => {
               </div>
 
               <div className="flex gap-4 pt-4">
-                <Button type="submit" variant="hero" className="flex-1">
+                <Button 
+                  type="submit" 
+                  variant="hero" 
+                  className="flex-1"
+                  disabled={submitting}
+                >
                   <Send className="mr-2 h-4 w-4" />
-                  Submit Report
+                  {submitting ? "Submitting..." : "Submit Report"}
                 </Button>
                 <Button
                   type="button"

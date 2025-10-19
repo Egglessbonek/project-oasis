@@ -1,24 +1,231 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Water Well Management System</title>
-    <meta name="description" content="Streamline water well management with QR code enabled issue reporting and comprehensive admin tracking dashboard" />
-    <meta name="author" content="Water Well Management" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Oasis - Map Test</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-    <meta property="og:title" content="Water Well Management System" />
-    <meta property="og:description" content="Track, maintain, and resolve well issues efficiently with modern management tools" />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <!-- React and Babel for running JSX in the browser -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@lovable_dev" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-  </head>
+    <!-- Leaflet for mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- React-Leaflet bindings -->
+    <script src="https://unpkg.com/react-leaflet@4.2.1/umd/react-leaflet.js"></script>
 
-  <body>
+    <style>
+        /* Ensures map fills the container */
+        .leaflet-container {
+            height: 100%;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+    <script type="text/babel">
+        // --- Configuration ---
+        const API_BASE_URL = 'http://localhost:3001/api'; 
+
+        // --- Helper Components ---
+        const LoadingSpinner = ({ message = "Loading..."}) => (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-4">
+                <svg className="h-12 w-12 animate-spin text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p className="text-sm text-gray-500">{message}</p>
+            </div>
+        );
+
+        // --- Main Application Logic ---
+        const startApp = () => {
+            const { MapContainer, TileLayer, Marker, Popup, Polygon } = window.ReactLeaflet;
+            
+            // --- Data Fetching Hook ---
+            const useWells = () => {
+                const [wells, setWells] = React.useState([]);
+                const [isLoading, setIsLoading] = React.useState(true);
+                const [error, setError] = React.useState(null);
+
+                React.useEffect(() => {
+                    const fetchWells = async () => {
+                        try {
+                            const response = await fetch(`${API_BASE_URL}/wells/`);
+                            if (!response.ok) {
+                                throw new Error(`Network Error: ${response.status} ${response.statusText}`);
+                            }
+                            const data = await response.json();
+                            setWells(data);
+                        } catch (err) {
+                            setError(err);
+                        } finally {
+                            setIsLoading(false);
+                        }
+                    };
+                    fetchWells();
+                }, []);
+                return { wells, isLoading, error };
+            };
+
+            // --- Map Components ---
+            const getStatusConfig = (status) => {
+                const config = {
+                    completed: { color: '#10B981', label: 'Completed' },
+                    building: { color: '#F59E0B', label: 'Building' },
+                    broken: { color: '#EF4444', label: 'Broken' },
+                    under_maintenance: { color: '#3B82F6', label: 'Maintenance' },
+                    draft: { color: '#6B7280', label: 'Draft' },
+                };
+                return config[status] || config.draft;
+            };
+
+            const createWellIcon = (status) => {
+                const { color } = getStatusConfig(status);
+                return L.divIcon({
+                    className: 'custom-well-icon',
+                    html: `<div class="relative flex items-center justify-center">
+                             <div class="absolute h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/10"></div>
+                             <div class="absolute h-4 w-4 rounded-full" style="background-color: ${color};"></div>
+                           </div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12],
+                    popupAnchor: [0, -12],
+                });
+            };
+            
+            const WellMarker = ({ well }) => {
+                const position = [well.location.coordinates[1], well.location.coordinates[0]];
+                const statusConfig = getStatusConfig(well.status);
+                const serviceAreaPolygon = well.service_area?.coordinates[0].map((p) => [p[1], p[0]]);
+
+                return (
+                    <React.Fragment>
+                        <Marker position={position} icon={createWellIcon(well.status)}>
+                            <Popup>
+                                <div className="w-52 space-y-1 p-1 text-sm">
+                                    <p className="truncate text-xs text-gray-500">ID: {well.id}</p>
+                                    <p className="capitalize font-semibold">
+                                        Status:{' '}
+                                        <span style={{ color: statusConfig.color }}>●</span> {statusConfig.label}
+                                    </p>
+                                    <p><strong>Usage:</strong> {well.current_load} / {well.capacity}</p>
+                                    <p><strong>Weight:</strong> {well.weight}</p>
+                                </div>
+                            </Popup>
+                        </Marker>
+                        {serviceAreaPolygon && (
+                            <Polygon 
+                                positions={serviceAreaPolygon} 
+                                pathOptions={{ 
+                                    color: statusConfig.color,
+                                    fillColor: statusConfig.color, 
+                                    fillOpacity: 0.2,
+                                    weight: 2
+                                }}
+                            />
+                        )}
+                    </React.Fragment>
+                );
+            };
+            
+            // --- Main Application Component ---
+            const App = () => {
+                const { wells, isLoading, error } = useWells();
+                const mapRef = React.useRef(null);
+
+                React.useEffect(() => {
+                    if (mapRef.current && wells && wells.length > 0) {
+                        const wellCoords = wells.map((well) => [well.location.coordinates[1], well.location.coordinates[0]]);
+                        const bounds = L.latLngBounds(wellCoords);
+                        if (bounds.isValid()) {
+                            mapRef.current.fitBounds(bounds.pad(0.2));
+                        }
+                    }
+                }, [wells]);
+                
+                const renderContent = () => {
+                    if (isLoading) {
+                        return <LoadingSpinner message="Connecting to Backend..." />;
+                    }
+                    if (error) {
+                        return (
+                            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+                                <h2 className="text-xl font-semibold text-red-600">Connection Error</h2>
+                                <p className="text-sm text-gray-600">Could not connect to the backend server.</p>
+                                <p className="text-xs text-gray-500 bg-red-50 p-2 rounded-md">Details: {error.message}</p>
+                                <button onClick={() => window.location.reload()} className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+                                    Try Again
+                                </button>
+                            </div>
+                        );
+                    }
+                    return (
+                        <MapContainer center={[30.2672, -97.7431]} zoom={12} scrollWheelZoom={true} ref={mapRef}>
+                            <TileLayer
+                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            />
+                            {wells.map((well) => <WellMarker key={well.id} well={well} />)}
+                        </MapContainer>
+                    );
+                };
+
+                return (
+                    <div className="flex h-screen flex-col">
+                        <header className="border-b bg-white p-4 shadow-sm">
+                            <h1 className="text-xl font-bold text-gray-800">Well Map Backend Test</h1>
+                        </header>
+                        <main className="flex-grow p-4">
+                            <div className="h-full w-full rounded-lg border bg-white shadow-sm">
+                                {renderContent()}
+                            </div>
+                        </main>
+                    </div>
+                );
+            };
+            
+            const container = document.getElementById('root');
+            const root = ReactDOM.createRoot(container);
+            root.render(<App />);
+        };
+
+        // --- Robust Library Loading Check ---
+        function waitForLibraries() {
+            let attempts = 0;
+            const maxAttempts = 50; // Try for 5 seconds (50 * 100ms)
+            const interval = setInterval(() => {
+                // Check if the global objects from the scripts are available
+                if (window.React && window.ReactDOM && window.L && window.ReactLeaflet) {
+                    clearInterval(interval);
+                    console.log("All libraries loaded. Starting app.");
+                    startApp();
+                } else {
+                    attempts++;
+                    if (attempts > maxAttempts) {
+                        clearInterval(interval);
+                        console.error("Failed to load required libraries after multiple attempts.");
+                        document.getElementById('root').innerHTML = `
+                            <div style="padding: 2rem; text-align: center; font-family: sans-serif;">
+                                <h2 style="color: #EF4444; font-size: 1.25rem; font-weight: 600;">Error: Critical Libraries Failed to Load</h2>
+                                <p style="color: #4B5563; margin-top: 0.5rem;">Could not load React or Leaflet. Please check your internet connection, ad-blockers, and try refreshing the page.</p>
+                            </div>
+                        `;
+                    }
+                }
+            }, 100);
+        }
+
+        waitForLibraries();
+    </script>
+</body>
 </html>
+

@@ -17,3 +17,9 @@ marshmallow
 marshmallow-sqlalchemy
 GeoAlchemy2
 Shapely
+numpy
+matplotlib
+scipy
+scikit-image
+pyproj
+tqdm

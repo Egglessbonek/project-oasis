@@ -9,30 +9,43 @@ import 'leaflet/dist/leaflet.css';
 const MapPage = () => {
   const [showServiceAreas, setShowServiceAreas] = useState(true);
   
-  // UT Austin campus well locations with service areas
-  const wells = [
-    { 
-      id: 1, 
-      name: "Main Building Well", 
-      position: [30.2862, -97.7394] as [number, number], 
-      status: "operational",
-      serviceArea: createServiceArea(500, "operational")
-    },
-    { 
-      id: 2, 
-      name: "Engineering Quad Well", 
-      position: [30.2882, -97.7359] as [number, number], 
-      status: "needs-repair",
-      serviceArea: createServiceArea(300, "needs-repair")
-    },
-    { 
-      id: 3, 
-      name: "West Campus Well", 
-      position: [30.2833, -97.7422] as [number, number], 
-      status: "operational",
-      serviceArea: createServiceArea(400, "operational")
-    },
-  ];
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+  const [wells, setWells] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchWells = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/wells/map`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch wells');
+        }
+        const data = await response.json();
+        
+        // Transform data for map display
+        const transformedWells = data.map((well: any) => ({
+          id: well.id,
+          name: `Well ${well.id}`,
+          position: [well.latitude, well.longitude] as [number, number],
+          status: well.status === 'completed' ? 'operational' : 'needs-repair',
+          serviceArea: well.service_area ? well.service_area : createServiceArea(300, well.status === 'completed' ? 'operational' : 'needs-repair'),
+          capacity: well.capacity,
+          current_load: well.current_load,
+          usage_percentage: well.usage_percentage,
+          status_color: well.status_color
+        }));
+
+        setWells(transformedWells);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load wells');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchWells();
+  }, []);
 
   // Filter wells based on service area visibility
   const wellsToDisplay = showServiceAreas 
